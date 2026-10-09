@@ -1,4 +1,7 @@
 build/
+build_pico/
+build_sim/
 assets/
 .venv/
 highscore.txt
+AGENTS.md

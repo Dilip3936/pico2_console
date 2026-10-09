@@ -19,3 +19,4 @@ void game_draw();
 int get_score();
 int get_highscore();
 enum GameState get_state();
+void get_telemetry(float* y, float* vy);

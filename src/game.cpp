@@ -76,6 +76,11 @@ int get_score() { return score; }
 int get_highscore() { return highscore; }
 GameState get_state() { return current_state; }
 
+void get_telemetry(float* y, float* vy) {
+    if (y) *y = bird_y;
+    if (vy) *vy = bird_velocity;
+}
+
 static bool check_collision() {
     // Ground collision
     if (bird_y + BIRD_SIZE >= GROUND_Y) return true;
