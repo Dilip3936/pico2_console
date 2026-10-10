@@ -49,21 +49,8 @@ int main() {
         sprintf(buffer, "FPS:%d", current_fps);
         draw_text(2, 2, buffer, 0xFFFF);
 
-        GameState state = get_state();
-        if (state == TITLE) {
-            draw_text(40, 40, "FLAPPY PICO", 0xFFFF);
-            draw_text(20, 80, "PRESS SPACE", 0xFFFF);
-        } else if (state == GAME_OVER) {
-            draw_text(45, 30, "GAME OVER", 0x0000); // black text
-            sprintf(buffer, "SCORE:%d", get_score());
-            draw_text(50, 50, buffer, 0x0000);
-            sprintf(buffer, "BEST:%d", get_highscore());
-            draw_text(50, 65, buffer, 0x0000);
-        } else if (state == PLAYING) {
-            sprintf(buffer, "%d", get_score());
-            draw_text(75, 10, buffer, 0xFFFF);
-        }
-       
+        game_draw_ui("PRESS SPACE");
+
         // Blit framebuffer to SDL window
         SDL_UpdateTexture(texture, NULL, framebuffer, DISPLAY_WIDTH * sizeof(uint16_t));
         SDL_RenderClear(renderer);

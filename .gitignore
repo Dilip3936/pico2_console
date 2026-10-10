@@ -4,4 +4,6 @@ build_sim/
 assets/
 .venv/
 highscore.txt
+docs.md
 AGENTS.md
+.vscode/

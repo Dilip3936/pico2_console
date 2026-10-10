@@ -36,6 +36,7 @@ else()
         src/main_pico.cpp
         src/game.cpp
         src/graphics.cpp
+        src/display.cpp
     )
 
     target_include_directories(pico_game PRIVATE include)
@@ -45,6 +46,7 @@ else()
 
     target_link_libraries(pico_game PRIVATE
         pico_stdlib
+        hardware_spi
     )
 
     # Enable USB serial, disable UART serial

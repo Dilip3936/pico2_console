@@ -9,21 +9,20 @@ void clear_screen(uint16_t color) {
         framebuffer[i] = color;
     }
 }
-void draw_sprite(int x, int y, const uint16_t* sprite_data, int w, int h) {
+void draw_sprite(int x, int y, const uint16_t* sprite_data, int w, int h, int scale) {
+    if (scale <= 0) return;
     for (int sy = 0; sy < h; sy++) {
         for (int sx = 0; sx < w; sx++) {
-            int screen_x = x + sx;
-            int screen_y = y + sy;
-
-            if (screen_x >= 0 && screen_x < DISPLAY_WIDTH && 
-                screen_y >= 0 && screen_y < DISPLAY_HEIGHT) {
-                
-                int screen_index = screen_y * DISPLAY_WIDTH + screen_x;
-                int sprite_index = sy * w + sx;
-                
-                uint16_t pixel = sprite_data[sprite_index];
-                if (pixel != 0xF81F) { 
-                    framebuffer[screen_index] = pixel;
+            uint16_t pixel = sprite_data[sy * w + sx];
+            if (pixel == 0xF81F) continue;
+            for (int dy = 0; dy < scale; dy++) {
+                int screen_y = y + sy * scale + dy;
+                if (screen_y < 0 || screen_y >= DISPLAY_HEIGHT) continue;
+                for (int dx = 0; dx < scale; dx++) {
+                    int screen_x = x + sx * scale + dx;
+                    if (screen_x >= 0 && screen_x < DISPLAY_WIDTH) {
+                        framebuffer[screen_y * DISPLAY_WIDTH + screen_x] = pixel;
+                    }
                 }
             }
         }

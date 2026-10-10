@@ -2,6 +2,7 @@
 #include <pico/stdlib.h>
 #include "game.h"
 #include "graphics.h"
+#include "display.h"
 
 int main() {
     stdio_usb_init();
@@ -10,13 +11,22 @@ int main() {
     sleep_ms(2000);
     printf("Starting Flappy Pico Console...\n");
 
+    display_init();
+    display_set_madctl(0x60); // MX + MV: landscape, keeping RGB order.
+    display_fill(COLOR_BLACK);
+
     game_init();
+    game_draw();
+    game_draw_ui("PRESS F/SPACE");
+    display_blit(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, framebuffer);
     
     uint64_t last_time = time_us_64();
-    const uint64_t frame_delay = 1000000 / 60; // 60 FPS
+    const uint64_t logic_delay = 1000000 / 60;
+    const uint64_t frame_delay = 1000000 / 30;
+    uint64_t last_frame_time = last_time;
     
     uint32_t frame_count = 0;
-    uint32_t last_fps_time = time_us_32();
+    uint64_t last_fps_time = time_us_64();
     uint32_t current_fps = 0;
     
     GameState last_state = get_state();
@@ -24,10 +34,9 @@ int main() {
     while (true) {
         uint64_t current_time = time_us_64();
         
-        // Fixed timestep 60Hz loop
-        if (current_time - last_time >= frame_delay) {
-            last_time = current_time;
-            
+        // Render at 30 FPS; preserve 60 Hz fixed game-logic steps.
+        if (current_time - last_frame_time >= frame_delay) {
+            last_frame_time = current_time;
             // Non-blocking input read from USB CDC
             int c = getchar_timeout_us(0);
             InputState input = {0};
@@ -39,17 +48,29 @@ int main() {
                 }
             }
 
-            // Update game logic
-            game_update(input);
-            // Draw to RAM framebuffer (for telemetry validation, not sent to SPI yet)
+            // Advance elapsed logic steps after blocking SPI writes.
+            // A serial key applies to one step, then releases for edge detection.
+            do {
+                game_update(input);
+                input.btn_a = false;
+                last_time += logic_delay;
+            } while (current_time - last_time >= logic_delay);
+
             game_draw();
+            game_draw_ui("PRESS F/SPACE");
+            // The bottom ground strip is static and was sent with the first frame.
+            display_blit(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT - GAME_GROUND_HEIGHT, framebuffer);
+            uint64_t frame_time = time_us_64() - current_time;
 
             frame_count++;
-            uint32_t now_ms = time_us_32() / 1000;
-            if (now_ms - (last_fps_time / 1000) >= 1000) {
-                current_fps = frame_count;
+            uint64_t now = time_us_64();
+            uint64_t fps_elapsed = now - last_fps_time;
+            if (fps_elapsed >= 1000000) {
+                current_fps = (frame_count * 1000000ULL + fps_elapsed / 2) / fps_elapsed;
+                printf("\n[DISPLAY] FPS:%u | frame time:%llu us\n",
+                       (unsigned)current_fps, (unsigned long long)frame_time);
                 frame_count = 0;
-                last_fps_time = time_us_32();
+                last_fps_time = now;
             }
 
             // Print state transitions

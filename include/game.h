@@ -12,9 +12,13 @@ struct InputState {
     bool up, down, left, right, btn_a, btn_b;
 };
 
+// Static ground strip; the Pico only needs to send it once.
+const int GAME_GROUND_HEIGHT = 24;
+
 void game_init();
 void game_update(struct InputState input);
 void game_draw();
+void game_draw_ui(const char* start_prompt);
 
 int get_score();
 int get_highscore();
