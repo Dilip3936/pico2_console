@@ -123,7 +123,9 @@ static bool check_collision() {
 }
 
 void game_update(struct InputState input) {
-    bool btn_a_pressed = input.btn_a && !prev_input.btn_a;
+    // Physical A-D all trigger Flappy's action; keyboard/serial keeps btn_a.
+    bool btn_a_pressed = (input.btn_a && !prev_input.btn_a) ||
+        (input.controls.pressed & (CONTROL_A | CONTROL_B | CONTROL_C | CONTROL_D));
 
     if (current_state == TITLE) {
         if (btn_a_pressed) {

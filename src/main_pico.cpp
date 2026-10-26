@@ -6,6 +6,7 @@
 
 int main() {
     stdio_usb_init();
+    controls_init();
 
     // Give the user a moment to open the serial monitor
     sleep_ms(2000);
@@ -17,7 +18,7 @@ int main() {
 
     game_init();
     game_draw();
-    game_draw_ui("PRESS F/SPACE");
+    game_draw_ui("PRESS A/B/C/D");
     display_blit(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, framebuffer);
     
     uint64_t last_time = time_us_64();
@@ -30,8 +31,13 @@ int main() {
     uint32_t current_fps = 0;
     
     GameState last_state = get_state();
+    uint8_t pending_pressed = 0;
+    uint8_t pending_released = 0;
 
     while (true) {
+        ControlsState controls = controls_poll();
+        pending_pressed |= controls.pressed;
+        pending_released |= controls.released;
         uint64_t current_time = time_us_64();
         
         // Render at 30 FPS; preserve 60 Hz fixed game-logic steps.
@@ -40,6 +46,11 @@ int main() {
             // Non-blocking input read from USB CDC
             int c = getchar_timeout_us(0);
             InputState input = {0};
+            input.controls = controls;
+            input.controls.pressed = pending_pressed;
+            input.controls.released = pending_released;
+            pending_pressed = 0;
+            pending_released = 0;
             
             if (c != PICO_ERROR_TIMEOUT) {
                 // Map 'f' or spacebar to btn_a (flap)
@@ -49,15 +60,17 @@ int main() {
             }
 
             // Advance elapsed logic steps after blocking SPI writes.
-            // A serial key applies to one step, then releases for edge detection.
+            // Press/release events apply once, even during catch-up steps.
             do {
                 game_update(input);
                 input.btn_a = false;
+                input.controls.pressed = 0;
+                input.controls.released = 0;
                 last_time += logic_delay;
             } while (current_time - last_time >= logic_delay);
 
             game_draw();
-            game_draw_ui("PRESS F/SPACE");
+            game_draw_ui("PRESS A/B/C/D");
             // The bottom ground strip is static and was sent with the first frame.
             display_blit(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT - GAME_GROUND_HEIGHT, framebuffer);
             uint64_t frame_time = time_us_64() - current_time;
@@ -78,7 +91,7 @@ int main() {
             if (state != last_state) {
                 if (state == PLAYING) printf("\n[STATE] GAME STARTED!\n");
                 else if (state == GAME_OVER) printf("\n[STATE] GAME OVER! Score: %d, Highscore: %d\n", get_score(), get_highscore());
-                else if (state == TITLE) printf("\n[STATE] TITLE SCREEN - Press 'f' or SPACE to start\n");
+                else if (state == TITLE) printf("\n[STATE] TITLE SCREEN - Press A/B/C/D or serial 'f'/SPACE to start\n");
                 last_state = state;
             }
 
@@ -90,6 +103,7 @@ int main() {
                     frame_count, y, vy, get_score(), current_fps);
             }
         }
+        sleep_ms(1);
     }
 
     return 0;

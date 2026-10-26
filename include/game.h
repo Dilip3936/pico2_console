@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "controls.h"
 
 enum GameState {
     TITLE,
@@ -10,6 +11,7 @@ enum GameState {
 
 struct InputState {
     bool up, down, left, right, btn_a, btn_b;
+    ControlsState controls;
 };
 
 // Static ground strip; the Pico only needs to send it once.

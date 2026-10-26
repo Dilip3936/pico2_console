@@ -37,6 +37,7 @@ else()
         src/game.cpp
         src/graphics.cpp
         src/display.cpp
+        src/controls.cpp
     )
 
     target_include_directories(pico_game PRIVATE include)
@@ -47,6 +48,7 @@ else()
     target_link_libraries(pico_game PRIVATE
         pico_stdlib
         hardware_spi
+        hardware_adc
     )
 
     # Enable USB serial, disable UART serial
@@ -55,4 +57,5 @@ else()
 
     # Generate .uf2 file
     pico_add_extra_outputs(pico_game)
+
 endif()
