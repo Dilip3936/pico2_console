@@ -18,11 +18,10 @@ int main() {
     int frame_count = 0;
     int current_fps = 0;
 
-    const int FPS_CAP = 60;
-    const int FRAME_DELAY = 1000 / FPS_CAP;
+    const Uint64 frame_delay = SDL_GetPerformanceFrequency() / GAME_FPS;
 
     while (running) {
-        Uint32 frame_start = SDL_GetTicks();
+        Uint64 frame_start = SDL_GetPerformanceCounter();
 
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
@@ -64,9 +63,11 @@ int main() {
             fps_timer = SDL_GetTicks();
         }
 
-        Uint32 frame_time = SDL_GetTicks() - frame_start;
-        if (FRAME_DELAY > frame_time) {
-            SDL_Delay(FRAME_DELAY - frame_time);
+        Uint64 frame_time = SDL_GetPerformanceCounter() - frame_start;
+        if (frame_delay > frame_time) {
+            Uint64 remaining = frame_delay - frame_time;
+            SDL_Delay((remaining * 1000 + SDL_GetPerformanceFrequency() - 1) /
+                      SDL_GetPerformanceFrequency());
         }
     }
 

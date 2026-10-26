@@ -22,8 +22,8 @@ int main() {
     display_blit(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, framebuffer);
     
     uint64_t last_time = time_us_64();
-    const uint64_t logic_delay = 1000000 / 60;
-    const uint64_t frame_delay = 1000000 / 30;
+    const uint64_t logic_delay = 1000000 / GAME_FPS;
+    const uint64_t frame_delay = logic_delay;
     uint64_t last_frame_time = last_time;
     
     uint32_t frame_count = 0;
@@ -40,7 +40,7 @@ int main() {
         pending_released |= controls.released;
         uint64_t current_time = time_us_64();
         
-        // Render at 30 FPS; preserve 60 Hz fixed game-logic steps.
+        // Update and render at 30 Hz.
         if (current_time - last_frame_time >= frame_delay) {
             last_frame_time = current_time;
             // Non-blocking input read from USB CDC
@@ -53,9 +53,9 @@ int main() {
             pending_released = 0;
             
             if (c != PICO_ERROR_TIMEOUT) {
-                // Map 'f' or spacebar to btn_a (flap)
+                // Each serial character is a press event, including consecutive frames.
                 if (c == 'f' || c == ' ' || c == 'F') {
-                    input.btn_a = true;
+                    input.controls.pressed |= CONTROL_A;
                 }
             }
 

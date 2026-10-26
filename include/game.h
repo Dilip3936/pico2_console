@@ -14,6 +14,8 @@ struct InputState {
     ControlsState controls;
 };
 
+const int GAME_FPS = 30;
+
 // Static ground strip; the Pico only needs to send it once.
 const int GAME_GROUND_HEIGHT = 24;
 

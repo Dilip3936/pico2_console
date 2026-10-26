@@ -25,8 +25,8 @@ struct Pipe {
 static GameState current_state = TITLE;
 static float bird_y = 0;
 static float bird_velocity = 0;
-static const float GRAVITY = 0.4f;
-static const float JUMP_STRENGTH = -5.4f;
+static const float GRAVITY = 1.6f;
+static const float JUMP_STRENGTH = -10.8f;
 static int score = 0;
 static int highscore = 0;
 static Pipe pipes[MAX_PIPES];
@@ -122,6 +122,11 @@ static bool check_collision() {
     return false;
 }
 
+static void update_bird() {
+    bird_velocity += GRAVITY;
+    bird_y += bird_velocity - GRAVITY / 4;
+}
+
 void game_update(struct InputState input) {
     // Physical A-D all trigger Flappy's action; keyboard/serial keeps btn_a.
     bool btn_a_pressed = (input.btn_a && !prev_input.btn_a) ||
@@ -137,12 +142,11 @@ void game_update(struct InputState input) {
             bird_velocity = JUMP_STRENGTH;
         }
 
-        bird_velocity += GRAVITY;
-        bird_y += bird_velocity;
+        update_bird();
 
         // Update pipes
         for (int i = 0; i < MAX_PIPES; i++) {
-            pipes[i].x -= 2.5f; // Pipe speed per 60 Hz logic step.
+            pipes[i].x -= 5.0f;
             
             // Score tracking
             if (!pipes[i].passed && pipes[i].x + PIPE_WIDTH < BIRD_X) {
@@ -162,7 +166,7 @@ void game_update(struct InputState input) {
 
         // Animation
         anim_timer++;
-        if (anim_timer > 5) {
+        if (anim_timer >= 3) {
             anim_timer = 0;
             anim_frame = (anim_frame + 1) % 3;
         }
@@ -176,8 +180,7 @@ void game_update(struct InputState input) {
         }
     } else if (current_state == GAME_OVER) {
         if (bird_y < GROUND_Y - SPRITE_SIZE) {
-            bird_velocity += GRAVITY;
-            bird_y += bird_velocity;
+            update_bird();
         }
         if (btn_a_pressed) {
             current_state = TITLE;
