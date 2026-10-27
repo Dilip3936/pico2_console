@@ -1,9 +1,9 @@
+#pragma once
 #include <stdint.h>
 
 #define DISPLAY_WIDTH 320
 #define DISPLAY_HEIGHT 240
 
-// The global framebuffer
 extern uint16_t framebuffer[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 
 void clear_screen(uint16_t color);

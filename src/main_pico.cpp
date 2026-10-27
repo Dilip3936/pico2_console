@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <pico/stdlib.h>
-#include "game.h"
+#include "console.h"
 #include "graphics.h"
 #include "display.h"
 
@@ -8,17 +8,16 @@ int main() {
     stdio_usb_init();
     controls_init();
 
-    // Give the user a moment to open the serial monitor
+    // We wait for the USB serial monitor before printing startup messages.
     sleep_ms(2000);
-    printf("Starting Flappy Pico Console...\n");
+    printf("Starting Pico Console...\n");
 
     display_init();
     display_set_madctl(0x60); // MX + MV: landscape, keeping RGB order.
     display_fill(COLOR_BLACK);
 
-    game_init();
-    game_draw();
-    game_draw_ui("PRESS A/B/C/D");
+    console_init("PRESS A/B/C/D");
+    console_draw();
     display_blit(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, framebuffer);
     
     uint64_t last_time = time_us_64();
@@ -30,7 +29,6 @@ int main() {
     uint64_t last_fps_time = time_us_64();
     uint32_t current_fps = 0;
     
-    GameState last_state = get_state();
     uint8_t pending_pressed = 0;
     uint8_t pending_released = 0;
 
@@ -40,10 +38,8 @@ int main() {
         pending_released |= controls.released;
         uint64_t current_time = time_us_64();
         
-        // Update and render at 30 Hz.
         if (current_time - last_frame_time >= frame_delay) {
             last_frame_time = current_time;
-            // Non-blocking input read from USB CDC
             int c = getchar_timeout_us(0);
             InputState input = {0};
             input.controls = controls;
@@ -53,26 +49,31 @@ int main() {
             pending_released = 0;
             
             if (c != PICO_ERROR_TIMEOUT) {
-                // Each serial character is a press event, including consecutive frames.
+                // We treat each serial character as a new press, even on consecutive frames.
                 if (c == 'f' || c == ' ' || c == 'F') {
                     input.controls.pressed |= CONTROL_A;
+                } else if (c == 'p' || c == 'P') {
+                    input.controls.pressed |= CONSOLE_PAUSE_BUTTON;
+                } else if (c == 'm' || c == 'M') {
+                    input.controls.pressed |= CONSOLE_MENU_BUTTON;
+                } else if (c == 'w' || c == 'W') {
+                    input.controls.pressed |= CONTROL_C;
+                } else if (c == 's' || c == 'S') {
+                    input.controls.pressed |= CONTROL_D;
                 }
             }
 
-            // Advance elapsed logic steps after blocking SPI writes.
-            // Press/release events apply once, even during catch-up steps.
+            // SPI transfers block this loop, so we catch up on elapsed logic steps.
+            // We clear events after the first step to avoid repeating a single press.
             do {
-                game_update(input);
-                input.btn_a = false;
+                console_update(input);
                 input.controls.pressed = 0;
                 input.controls.released = 0;
                 last_time += logic_delay;
             } while (current_time - last_time >= logic_delay);
 
-            game_draw();
-            game_draw_ui("PRESS A/B/C/D");
-            // The bottom ground strip is static and was sent with the first frame.
-            display_blit(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT - GAME_GROUND_HEIGHT, framebuffer);
+            int rows = console_draw();
+            display_blit(0, 0, DISPLAY_WIDTH, rows, framebuffer);
             uint64_t frame_time = time_us_64() - current_time;
 
             frame_count++;
@@ -86,22 +87,7 @@ int main() {
                 last_fps_time = now;
             }
 
-            // Print state transitions
-            GameState state = get_state();
-            if (state != last_state) {
-                if (state == PLAYING) printf("\n[STATE] GAME STARTED!\n");
-                else if (state == GAME_OVER) printf("\n[STATE] GAME OVER! Score: %d, Highscore: %d\n", get_score(), get_highscore());
-                else if (state == TITLE) printf("\n[STATE] TITLE SCREEN - Press A/B/C/D or serial 'f'/SPACE to start\n");
-                last_state = state;
-            }
-
-            // Print continuous telemetry (throttle it to prevent USB flood, maybe every 10 frames)
-            if (frame_count % 10 == 0 && state == PLAYING) {
-                float y, vy;
-                get_telemetry(&y, &vy);
-                printf("F:%04d | Y:%6.2f | VY:%6.2f | SCORE:%2d | FPS:%2d\r", 
-                    frame_count, y, vy, get_score(), current_fps);
-            }
+            console_debug();
         }
         sleep_ms(1);
     }

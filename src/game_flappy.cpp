@@ -1,6 +1,6 @@
 #include "game.h"
 #include "graphics.h"
-#include "sprites.h"
+#include "flappy_assets.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -12,8 +12,14 @@
 #define PIPE_WIDTH 32
 #define PIPE_GAP 72
 #define BIRD_X 72
-#define BIRD_SIZE (14 * SPRITE_SCALE) // Slightly smaller than the scaled sprite.
-#define GROUND_Y (DISPLAY_HEIGHT - GAME_GROUND_HEIGHT)
+#define BIRD_SIZE (14 * SPRITE_SCALE)
+// We keep the bottom 24 rows static so Flappy can skip transferring them after entry.
+#define GROUND_Y (DISPLAY_HEIGHT - 24)
+#define BIRD_GROUND_Y (GROUND_Y - SPRITE_SIZE)
+
+namespace {
+
+enum GameState { TITLE, PLAYING, GAME_OVER };
 
 struct Pipe {
     float x;
@@ -21,7 +27,6 @@ struct Pipe {
     bool passed;
 };
 
-// Game state
 static GameState current_state = TITLE;
 static float bird_y = 0;
 static float bird_velocity = 0;
@@ -33,7 +38,8 @@ static Pipe pipes[MAX_PIPES];
 static int anim_frame = 0;
 static int anim_timer = 0;
 
-static struct InputState prev_input = {0};
+static GameState last_debug_state = TITLE;
+static unsigned debug_frames = 0;
 
 static void load_highscore() {
 #ifndef PICO_BUILD
@@ -71,50 +77,40 @@ static void reset_game() {
     }
 }
 
-void game_init() {
+void flappy_init() {
+    anim_frame = 0;
+    anim_timer = 0;
+    last_debug_state = TITLE;
+    debug_frames = 0;
     load_highscore();
     reset_game();
     current_state = TITLE;
 }
 
-int get_score() { return score; }
-int get_highscore() { return highscore; }
-GameState get_state() { return current_state; }
-
-void get_telemetry(float* y, float* vy) {
-    if (y) *y = bird_y;
-    if (vy) *vy = bird_velocity;
-}
-
 static bool check_collision() {
-    // Ground collision
-    if (bird_y + BIRD_SIZE >= GROUND_Y) return true;
-    if (bird_y <= 0) return true; // Ceiling collision
+    if (bird_y >= BIRD_GROUND_Y) return true;
+    if (bird_y <= 0) return true;
 
-    // Pipe collision
     for (int i = 0; i < MAX_PIPES; i++) {
         float px = pipes[i].x;
         float py = pipes[i].gap_y;
 
-        // Bounding box for bird
-        float bx1 = BIRD_X + 2 * SPRITE_SCALE; // Offset for generous hitbox.
+        // We inset the hitbox so touching the sprite edges is a little more forgiving.
+        float bx1 = BIRD_X + 2 * SPRITE_SCALE;
         float bx2 = BIRD_X + BIRD_SIZE - 2 * SPRITE_SCALE;
         float by1 = bird_y + 2 * SPRITE_SCALE;
         float by2 = bird_y + BIRD_SIZE - 2 * SPRITE_SCALE;
 
-        // Upper pipe
         float upx1 = px;
         float upx2 = px + PIPE_WIDTH;
         float upy1 = 0;
         float upy2 = py - PIPE_GAP / 2;
 
-        // Lower pipe
         float lpx1 = px;
         float lpx2 = px + PIPE_WIDTH;
         float lpy1 = py + PIPE_GAP / 2;
         float lpy2 = GROUND_Y;
 
-        // Check rect intersection
         if (bx1 < upx2 && bx2 > upx1 && by1 < upy2 && by2 > upy1) return true;
         if (bx1 < lpx2 && bx2 > lpx1 && by1 < lpy2 && by2 > lpy1) return true;
     }
@@ -124,13 +120,16 @@ static bool check_collision() {
 
 static void update_bird() {
     bird_velocity += GRAVITY;
-    bird_y += bird_velocity - GRAVITY / 4;
+    bird_y += bird_velocity;
+    if (bird_y >= BIRD_GROUND_Y) {
+        bird_y = BIRD_GROUND_Y;
+        bird_velocity = 0;
+    }
 }
 
-void game_update(struct InputState input) {
-    // Physical A-D all trigger Flappy's action; keyboard/serial keeps btn_a.
-    bool btn_a_pressed = (input.btn_a && !prev_input.btn_a) ||
-        (input.controls.pressed & (CONTROL_A | CONTROL_B | CONTROL_C | CONTROL_D));
+void flappy_update(const InputState& input) {
+    bool btn_a_pressed = input.controls.pressed &
+        (CONTROL_A | CONTROL_B | CONTROL_C | CONTROL_D);
 
     if (current_state == TITLE) {
         if (btn_a_pressed) {
@@ -144,17 +143,14 @@ void game_update(struct InputState input) {
 
         update_bird();
 
-        // Update pipes
         for (int i = 0; i < MAX_PIPES; i++) {
             pipes[i].x -= 5.0f;
             
-            // Score tracking
             if (!pipes[i].passed && pipes[i].x + PIPE_WIDTH < BIRD_X) {
                 pipes[i].passed = true;
                 score++;
             }
 
-            // Respawn pipe
             if (pipes[i].x < -PIPE_WIDTH) {
                 float max_x = 0;
                 for (int j = 0; j < MAX_PIPES; j++) {
@@ -164,7 +160,6 @@ void game_update(struct InputState input) {
             }
         }
 
-        // Animation
         anim_timer++;
         if (anim_timer >= 3) {
             anim_timer = 0;
@@ -179,34 +174,29 @@ void game_update(struct InputState input) {
             current_state = GAME_OVER;
         }
     } else if (current_state == GAME_OVER) {
-        if (bird_y < GROUND_Y - SPRITE_SIZE) {
+        if (bird_y < BIRD_GROUND_Y) {
             update_bird();
         }
         if (btn_a_pressed) {
             current_state = TITLE;
         }
     }
-
-    prev_input = input;
 }
 
-void game_draw() {
+void draw_playfield() {
     clear_screen(0x5CBF); // Sky blue background
 
-    // Draw pipes
     if (current_state == PLAYING || current_state == GAME_OVER) {
         for (int i = 0; i < MAX_PIPES; i++) {
             int px = (int)pipes[i].x;
             int py = (int)pipes[i].gap_y;
 
-            // Lower pipe
             int lower_y = py + PIPE_GAP / 2;
             draw_sprite(px, lower_y, pipe_top, 16, 16, SPRITE_SCALE);
             for (int y = lower_y + SPRITE_SIZE; y < GROUND_Y; y += SPRITE_SIZE) {
                 draw_sprite(px, y, pipe_middle, 16, 16, SPRITE_SCALE);
             }
             
-            // Upper pipe
             int upper_y = py - PIPE_GAP / 2;
             draw_sprite(px, upper_y - SPRITE_SIZE, pipe_bottom, 16, 16, SPRITE_SCALE);
             for (int y = upper_y - 2 * SPRITE_SIZE; y >= -SPRITE_SIZE; y -= SPRITE_SIZE) {
@@ -215,19 +205,15 @@ void game_draw() {
         }
     }
 
-    // Draw ground
-    draw_filled_rect(0, GROUND_Y, DISPLAY_WIDTH, DISPLAY_HEIGHT - GROUND_Y, 0xDE8B); // Greenish brown ground
-    draw_rect(0, GROUND_Y, DISPLAY_WIDTH, 1, 0x0000); // Outline
+    draw_filled_rect(0, GROUND_Y, DISPLAY_WIDTH, DISPLAY_HEIGHT - GROUND_Y, 0xDE8B); // Ground
+    draw_rect(0, GROUND_Y, DISPLAY_WIDTH, 1, 0x0000);
 
-    // Draw bird
     if (current_state == TITLE) {
         draw_sprite(BIRD_X, DISPLAY_HEIGHT / 2, bird2, 16, 16, SPRITE_SCALE);
     } else {
         const uint16_t* bird_sprites[] = {bird1, bird2, bird3};
         int frame = (bird_velocity < 0) ? anim_frame : 1;
-        int draw_y = (int)bird_y;
-        if (draw_y > GROUND_Y - SPRITE_SIZE) draw_y = GROUND_Y - SPRITE_SIZE;
-        draw_sprite(BIRD_X, draw_y, bird_sprites[frame], 16, 16, SPRITE_SCALE);
+        draw_sprite(BIRD_X, (int)bird_y, bird_sprites[frame], 16, 16, SPRITE_SCALE);
     }
 }
 
@@ -235,7 +221,8 @@ static void draw_centered_text(int y, const char* text, uint16_t color) {
     draw_text((DISPLAY_WIDTH - (int)strlen(text) * 6) / 2, y, text, color);
 }
 
-void game_draw_ui(const char* start_prompt) {
+void flappy_draw(const char* start_prompt) {
+    draw_playfield();
     char buffer[32];
     if (current_state == TITLE) {
         draw_filled_rect(80, 32, 160, 72, 0xFFFF);
@@ -255,3 +242,22 @@ void game_draw_ui(const char* start_prompt) {
         draw_centered_text(12, buffer, 0xFFFF);
     }
 }
+
+void flappy_debug() {
+    if (current_state != last_debug_state) {
+        if (current_state == PLAYING) printf("[STATE] GAME STARTED!\n");
+        else if (current_state == GAME_OVER) {
+            printf("[STATE] GAME OVER! Score: %d, Highscore: %d\n", score, highscore);
+        } else printf("[STATE] TITLE SCREEN\n");
+        last_debug_state = current_state;
+    }
+    if (++debug_frames % 10 == 0 && current_state == PLAYING) {
+        printf("[FLAPPY] Y:%.2f VY:%.2f SCORE:%d\n", bird_y, bird_velocity, score);
+    }
+}
+}
+
+extern const Game game_flappy = {
+    "Flappy Bird", flappy_init, flappy_update, flappy_draw,
+    GROUND_Y, flappy_debug
+};

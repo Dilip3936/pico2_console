@@ -36,5 +36,5 @@ def extract_sprites(image_path, output_file):
             f.write("};\n\n")
 
 if __name__ == "__main__":
-    extract_sprites("assets/flappy.png", "include/sprites.h")
-    print("Successfully generated include/sprites.h")
+    extract_sprites("assets/flappy.png", "include/flappy_assets.h")
+    print("Successfully generated include/flappy_assets.h")
