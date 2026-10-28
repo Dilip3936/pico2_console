@@ -4,7 +4,9 @@
 #define DISPLAY_WIDTH 320
 #define DISPLAY_HEIGHT 240
 
-extern uint16_t framebuffer[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+extern uint16_t* framebuffer;
+
+void graphics_swap_buffers();
 
 void clear_screen(uint16_t color);
 void draw_pixel(int x, int y, uint16_t color);

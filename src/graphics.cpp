@@ -1,8 +1,13 @@
 #include "graphics.h"
 #include "font.h"
 
-// Define the global framebuffer declared in graphics.h
-uint16_t framebuffer[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static uint16_t framebuffers[2][DISPLAY_WIDTH * DISPLAY_HEIGHT];
+
+uint16_t* framebuffer = framebuffers[0];
+
+void graphics_swap_buffers() {
+    framebuffer = framebuffer == framebuffers[0] ? framebuffers[1] : framebuffers[0];
+}
 
 void clear_screen(uint16_t color) {
     for (int i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++) {

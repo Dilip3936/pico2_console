@@ -28,3 +28,9 @@ void display_fill(uint16_t color);
 void display_fill_rect(int x, int y, int w, int h, uint16_t color);
 // Send an unscaled RGB565 image that fits entirely inside the current orientation.
 void display_blit(int x, int y, int w, int h, const uint16_t* pixels);
+
+// False means busy or invalid bounds. On success, pixels must stay unchanged
+// until display_busy() returns false, including the last SPI bits on the wire.
+bool display_blit_async(int x, int y, int w, int h, const uint16_t* pixels);
+bool display_busy();
+void display_wait();

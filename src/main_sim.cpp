@@ -60,6 +60,7 @@ int main() {
     InputState input = {};
     input.controls.x = input.controls.y = 2048; // We leave the virtual joystick centered.
     bool running = true;
+    int exit_code = 0;
     SDL_Event event;
 
     Uint32 fps_timer = SDL_GetTicks();
@@ -96,7 +97,12 @@ int main() {
         char buffer[32];
         snprintf(buffer, sizeof(buffer), "FPS:%u", current_fps);
         draw_text(2, 2, buffer, 0xFFFF);
-        SDL_UpdateTexture(texture, nullptr, framebuffer, DISPLAY_WIDTH * sizeof(uint16_t));
+        if (SDL_UpdateTexture(texture, nullptr, framebuffer, DISPLAY_WIDTH * sizeof(uint16_t)) != 0) {
+            fprintf(stderr, "SDL texture update failed: %s\n", SDL_GetError());
+            exit_code = 1;
+            break;
+        }
+        graphics_swap_buffers();
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, texture, nullptr, nullptr);
         SDL_RenderPresent(renderer);
@@ -121,5 +127,5 @@ int main() {
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
-    return 0;
+    return exit_code;
 }

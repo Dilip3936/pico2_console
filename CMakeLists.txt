@@ -40,6 +40,7 @@ else()
         pico_stdlib
         hardware_spi
         hardware_adc
+        hardware_dma
     )
 
     pico_enable_stdio_usb(pico_game 1)

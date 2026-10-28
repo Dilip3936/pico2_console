@@ -1,5 +1,6 @@
 #include "display.h"
 #include <hardware/spi.h>
+#include <hardware/dma.h>
 #include <pico/stdlib.h>
 
 static const uint PIN_CS = 17;
@@ -11,9 +12,30 @@ static const uint SPI_BAUD = 40000000; // SDK selects 37.5 MHz with the default 
 static const uint SPI_INIT_BAUD = 4000000;
 static int display_width = TFT_WIDTH;
 static int display_height = TFT_HEIGHT;
+static int dma_channel = -1;
+static bool transfer_active = false;
+
+bool display_busy() {
+    if (!transfer_active) return false;
+    // DMA finishing only means the last word reached the FIFO, not the panel.
+    if (dma_channel_is_busy(dma_channel) || spi_is_busy(spi0)) return true;
+
+    // Like the SDK's write-only SPI path, we discard RX and clear overrun.
+    while (spi_is_readable(spi0)) (void)spi_get_hw(spi0)->dr;
+    spi_get_hw(spi0)->icr = SPI_SSPICR_RORIC_BITS;
+    gpio_put(PIN_CS, 1);
+    spi_set_format(spi0, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+    transfer_active = false;
+    return false;
+}
+
+void display_wait() {
+    while (display_busy()) tight_loop_contents();
+}
 
 static void write_command(uint8_t command, const uint8_t* data = nullptr,
                           size_t length = 0) {
+    display_wait();
     gpio_put(PIN_CS, 0);
     gpio_put(PIN_DC, 0);
     spi_write_blocking(spi0, &command, 1);
@@ -62,6 +84,8 @@ static void init_st7789() {
 }
 
 void display_init() {
+    display_wait();
+    if (dma_channel < 0) dma_channel = dma_claim_unused_channel(true);
     display_width = TFT_WIDTH;
     display_height = TFT_HEIGHT;
     gpio_init(PIN_CS);
@@ -138,9 +162,15 @@ void display_fill(uint16_t color) {
 }
 
 void display_blit(int x, int y, int w, int h, const uint16_t* pixels) {
+    display_wait();
+    if (display_blit_async(x, y, w, h, pixels)) display_wait();
+}
+
+bool display_blit_async(int x, int y, int w, int h, const uint16_t* pixels) {
     if (!pixels || x < 0 || y < 0 || w <= 0 || h <= 0 ||
         x >= display_width || y >= display_height ||
-        w > display_width - x || h > display_height - y) return;
+        w > display_width - x || h > display_height - y ||
+        dma_channel < 0 || display_busy()) return false;
     set_window(x, y, w, h);
 
     gpio_put(PIN_CS, 0);
@@ -151,7 +181,13 @@ void display_blit(int x, int y, int w, int h, const uint16_t* pixels) {
 
     // Hardware sends each RGB565 word MSB first, without a conversion buffer.
     spi_set_format(spi0, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
-    spi_write16_blocking(spi0, pixels, w * h);
-    spi_set_format(spi0, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
-    gpio_put(PIN_CS, 1);
+    dma_channel_config config = dma_channel_get_default_config(dma_channel);
+    channel_config_set_transfer_data_size(&config, DMA_SIZE_16);
+    channel_config_set_read_increment(&config, true);
+    channel_config_set_write_increment(&config, false);
+    channel_config_set_dreq(&config, spi_get_dreq(spi0, true));
+    transfer_active = true;
+    dma_channel_configure(dma_channel, &config, &spi_get_hw(spi0)->dr,
+                          pixels, w * h, true);
+    return true;
 }
