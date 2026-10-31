@@ -5,6 +5,8 @@ struct InputState {
     // We keep keyboard directions separate from the raw joystick readings in controls.x/y.
     bool up, down, left, right;
     ControlsState controls;
+    // Local race testing supplies player two separately; hardware input remains player one.
+    ControlsState second_player_controls;
 };
 
 const int GAME_FPS = 30;

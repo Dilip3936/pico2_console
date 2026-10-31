@@ -14,12 +14,18 @@ void clear_screen(uint16_t color) {
         framebuffer[i] = color;
     }
 }
-void draw_sprite(int x, int y, const uint16_t* sprite_data, int w, int h, int scale) {
+void draw_sprite(int x, int y, const uint16_t* sprite_data, int w, int h, int scale, bool dim) {
     if (scale <= 0) return;
     for (int sy = 0; sy < h; sy++) {
         for (int sx = 0; sx < w; sx++) {
             uint16_t pixel = sprite_data[sy * w + sx];
             if (pixel == 0xF81F) continue;
+            if (dim) {
+                unsigned red = ((pixel >> 11) & 31) * 3 / 4;
+                unsigned green = ((pixel >> 5) & 63) * 3 / 4;
+                unsigned blue = (pixel & 31) * 3 / 4;
+                pixel = (red << 11) | (green << 5) | blue;
+            }
             for (int dy = 0; dy < scale; dy++) {
                 int screen_y = y + sy * scale + dy;
                 if (screen_y < 0 || screen_y >= DISPLAY_HEIGHT) continue;
