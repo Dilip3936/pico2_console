@@ -59,3 +59,41 @@ completion. Wait for its `RESULT`, allow 200 ms for receiver draining, then send
 sequence streak. Its expected count includes leading/trailing losses and assumes
 the sender completed all 1,000 submissions. No-ACK `sent_unconfirmed` is local
 completion only. USB reports replace RF echoes; no one-way latency is measured.
+
+## Reusable task profiler
+
+```sh
+cmake --build build_test --target cpu_profile -j4
+```
+
+`build_test/cpu_profile.uf2` runs the current console/game main loop with timing
+wrappers from the single source `tests/cpu_profile.cpp`. Game/driver sources are
+referenced, not copied. Normal `pico_game` builds do not contain the profiler.
+Building does not flash either board. Use a Release configuration for comparisons
+(`cmake -S tests -B build_test -DCMAKE_BUILD_TYPE=Release`).
+
+Flash the profiler manually to the desired console(s), open USB serial and use
+normal controls to exercise menus, games, pause or wireless multiplayer. It emits
+`[PROFILE]`, eight `[PROFILE_TASK]` lines and `[PROFILE_END]` roughly once per
+second. Task lines show total microseconds, elapsed-time percentage, call count,
+integer mean and maximum. Divide header polls/updates/frames by
+`elapsed_us / 1000000` for rates. `accounted_us` should equal `elapsed_us` exactly;
+percentage rounding can prevent displayed percentages summing to 100.
+
+These are core-0 **elapsed wall times, not active CPU cycles/utilization**.
+Blocking waits and interrupts stay in their enclosing task. `sleep` is not CPU
+work; display DMA duration is not charged as CPU work. `game_update` times each
+`console_update`, not input preparation or an entire catch-up batch; `other`
+contains remaining loop work and instrumentation. Counts/maxima for `other` are
+residual gap spans. Radio work called inside a game update stays in that bucket.
+Startup is excluded. Report printing belongs to the next interval's logging;
+extra logging and timing perturb the workload. Session/role are boundary values,
+so discard windows spanning scenario transitions. No packet loss/airtime, actual
+button latency or runtime RAM/stack headroom is measured.
+
+The wrappers follow the actual main loop via an include; review the aliases if
+main-loop call names change or new tasks need separate attribution. Keep this
+CMake target's source/dependency/definition list aligned with the normal Pico
+target when adding subsystems; game discovery is automatic. Restore the
+normal `build_pico/pico_game.uf2` after testing. Serial ACLs may need renewing
+after each reboot; see `docs.md` for the established device-access procedure.
