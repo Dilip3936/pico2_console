@@ -3,6 +3,7 @@
 #include "console.h"
 #include "graphics.h"
 #include "display.h"
+#include "multiplayer.h"
 
 int main() {
     stdio_usb_init();
@@ -41,6 +42,7 @@ int main() {
         ControlsState controls = controls_poll();
         pending_pressed |= controls.pressed;
         pending_released |= controls.released;
+        multiplayer_service(time_us_64());
         uint64_t current_time = time_us_64();
         
         bool busy = display_busy();

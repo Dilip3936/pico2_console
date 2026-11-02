@@ -1,6 +1,7 @@
 #include <SDL2/SDL.h>
 #include "graphics.h"
 #include "console.h"
+#include "multiplayer.h"
 #include <stdio.h>
 
 namespace {
@@ -75,6 +76,8 @@ int main() {
 
     while (running) {
         Uint64 frame_start = SDL_GetPerformanceCounter();
+        multiplayer_service((frame_start / timer_frequency) * 1000000ULL +
+                            (frame_start % timer_frequency) * 1000000ULL / timer_frequency);
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
             if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
@@ -131,6 +134,7 @@ int main() {
         }
     }
 
+    multiplayer_close();
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

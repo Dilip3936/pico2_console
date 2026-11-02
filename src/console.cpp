@@ -1,4 +1,5 @@
 #include "console.h"
+#include "multiplayer.h"
 #include "graphics.h"
 #include <stdio.h>
 #include <string.h>
@@ -40,6 +41,7 @@ void draw_menu() {
 }
 
 void console_init(const char* prompt) {
+    multiplayer_close();
     active_game = nullptr;
     selected_game = 0;
     paused = false;
@@ -58,6 +60,7 @@ void console_update(const InputState& input) {
 
     // We handle system actions first so the same press cannot also trigger gameplay.
     if (pressed & CONSOLE_MENU_BUTTON) {
+        multiplayer_close();
         active_game = nullptr;
         paused = false;
         full_refresh = true;
@@ -75,6 +78,26 @@ void console_update(const InputState& input) {
             active_game->init();
             full_refresh = true;
         }
+        return;
+    }
+
+    if (active_game->multiplayer_update &&
+        (multiplayer_state() == MultiplayerState::connected || multiplayer_game_active())) {
+        InputState network_input = input;
+        if (!multiplayer_game_active()) {
+            multiplayer_enter_game();
+            // Connection-screen actions must not also mark ready or flap.
+            network_input.controls.pressed = 0;
+            network_input.controls.released = 0;
+            full_refresh = true;
+        }
+        active_game->multiplayer_update(network_input);
+        if (multiplayer_state() == MultiplayerState::connected) return;
+    }
+
+    if (multiplayer_is_open()) {
+        multiplayer_update(input);
+        full_refresh = true;
         return;
     }
 
@@ -100,6 +123,13 @@ int console_draw() {
         return DISPLAY_HEIGHT;
     }
 
+    if (multiplayer_is_open()) {
+        multiplayer_draw();
+        // The shared screen uses the whole panel, including Flappy's static ground.
+        full_refresh = true;
+        return DISPLAY_HEIGHT;
+    }
+
     active_game->draw(action_prompt);
     if (paused) {
         draw_filled_rect(60, 80, 200, 72, 0xFFFF);
@@ -116,5 +146,7 @@ int console_draw() {
 }
 
 void console_debug() {
-    if (active_game && !paused && active_game->debug) active_game->debug();
+    if (active_game && !paused && !multiplayer_is_open() && active_game->debug) {
+        active_game->debug();
+    }
 }

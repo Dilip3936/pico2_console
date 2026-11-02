@@ -28,6 +28,7 @@ else()
         src/main_pico.cpp
         src/display.cpp
         src/controls.cpp
+        src/radio.cpp
     )
     set(CONSOLE_TARGET pico_game)
 
@@ -86,6 +87,7 @@ file(GENERATE
 target_compile_features(${CONSOLE_TARGET} PRIVATE cxx_std_14)
 target_sources(${CONSOLE_TARGET} PRIVATE
     src/console.cpp
+    src/multiplayer.cpp
     src/graphics.cpp
     ${GAME_SOURCES}
     "${CMAKE_CURRENT_BINARY_DIR}/generated/game_registry.cpp"

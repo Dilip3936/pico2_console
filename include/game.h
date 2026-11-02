@@ -21,4 +21,7 @@ struct Game {
     // unchanged until the game exits; entry and pause/resume always send a full frame.
     int redraw_rows = 0;
     void (*debug)() = nullptr;               // Optional Pico USB diagnostics; no gameplay changes here.
+    // Connected games own shared pause/readiness; also called after a disconnect
+    // so they can abort before the connection screen takes over.
+    void (*multiplayer_update)(const InputState& input) = nullptr;
 };
