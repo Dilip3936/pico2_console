@@ -11,6 +11,8 @@ const uint8_t CONSOLE_PAUSE_BUTTON = CONTROL_E;
 const uint8_t CONSOLE_MENU_BUTTON = CONTROL_F;
 
 void console_init(const char* action_prompt);
+// Leave the current game/session and return to the existing game selection.
+void console_return_to_selection();
 void console_update(const InputState& input);
 // The return value tells the Pico how many top rows need transferring.
 int console_draw();

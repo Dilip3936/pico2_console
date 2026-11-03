@@ -19,6 +19,14 @@ struct ControlsState {
     uint16_t y;
 };
 
+// Menu actions are decoded once by the console; gameplay keeps the raw controls.
+struct MenuInput {
+    bool up = false;
+    bool down = false;
+    bool select = false;
+    bool back = false;
+};
+
 void controls_init();
 // Poll regularly. Event masks contain changes since the previous poll.
 ControlsState controls_poll();

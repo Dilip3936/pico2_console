@@ -17,7 +17,7 @@ int main() {
     display_set_madctl(0x60); // MX + MV: landscape, keeping RGB order.
     display_fill(COLOR_BLACK);
 
-    console_init("PRESS A/B/C/D");
+    console_init("B/K: SELECT  A/C: MOVE");
     console_draw();
     display_blit(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, framebuffer);
     
@@ -64,14 +64,16 @@ int main() {
             if (c != PICO_ERROR_TIMEOUT) {
                 // We treat each serial character as a new press, even on consecutive frames.
                 if (c == 'f' || c == ' ' || c == 'F') {
-                    input.controls.pressed |= CONTROL_A;
+                    input.controls.pressed |= CONTROL_B;
                 } else if (c == 'p' || c == 'P') {
                     input.controls.pressed |= CONSOLE_PAUSE_BUTTON;
                 } else if (c == 'm' || c == 'M') {
                     input.controls.pressed |= CONSOLE_MENU_BUTTON;
                 } else if (c == 'w' || c == 'W') {
-                    input.controls.pressed |= CONTROL_C;
+                    input.controls.pressed |= CONTROL_A;
                 } else if (c == 's' || c == 'S') {
+                    input.controls.pressed |= CONTROL_C;
+                } else if (c == 'd' || c == 'D') {
                     input.controls.pressed |= CONTROL_D;
                 }
             }

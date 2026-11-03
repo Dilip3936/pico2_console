@@ -350,16 +350,15 @@ void multiplayer_service(uint64_t now_us) {
 
 void multiplayer_update(const InputState& input) {
     if (!multiplayer_is_open()) return;
-    uint8_t pressed = input.controls.pressed;
-    if (pressed & CONTROL_B) {
+    if (input.menu.back) {
         if (state == MultiplayerState::choosing) multiplayer_close();
         else choose();
         return;
     }
     if (state != MultiplayerState::choosing) return;
-    if (pressed & CONTROL_C) selected = (selected + CHOICE_COUNT - 1) % CHOICE_COUNT;
-    else if (pressed & CONTROL_D) selected = (selected + 1) % CHOICE_COUNT;
-    else if (pressed & CONTROL_A) {
+    if (input.menu.up) selected = (selected + CHOICE_COUNT - 1) % CHOICE_COUNT;
+    else if (input.menu.down) selected = (selected + 1) % CHOICE_COUNT;
+    else if (input.menu.select) {
         if (selected == 0) start(MultiplayerRole::host);
         else if (selected == 1) start(MultiplayerRole::joiner);
 #ifndef PICO_BUILD
@@ -387,8 +386,8 @@ void multiplayer_draw() {
             if (i == selected) draw_filled_rect(44, y - 4, 232, 18, 0xffff);
             centered_text(y, choices[i], i == selected ? 0x0000 : 0xffff);
         }
-        centered_text(200, "C/D: CHOOSE   A: CONFIRM");
-        centered_text(220, "B: BACK");
+        centered_text(200, "A/C OR STICK: CHOOSE");
+        centered_text(220, "B/K: SELECT   D: BACK");
         return;
     }
     centered_text(54, role == MultiplayerRole::host ? "ROLE: HOST" : "ROLE: JOINER");
@@ -426,7 +425,7 @@ void multiplayer_draw() {
     default:
         break;
     }
-    centered_text(220, "B: RETURN TO HOST/JOIN");
+    centered_text(220, "D: RETURN TO HOST/JOIN");
 }
 
 bool multiplayer_take_local_test() {

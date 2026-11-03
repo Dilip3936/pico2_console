@@ -7,6 +7,7 @@ struct InputState {
     ControlsState controls;
     // Local race testing supplies player two separately; hardware input remains player one.
     ControlsState second_player_controls;
+    MenuInput menu;
 };
 
 const int GAME_FPS = 30;

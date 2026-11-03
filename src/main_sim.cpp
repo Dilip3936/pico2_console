@@ -59,7 +59,7 @@ int main() {
         return 1;
     }
 
-    console_init("PRESS SPACE / X / C / D");
+    console_init("X / ENTER: SELECT");
     InputState input = {};
     input.controls.x = input.controls.y = 2048; // We leave the virtual joystick centered.
     input.second_player_controls.x = input.second_player_controls.y = 2048;

@@ -2,6 +2,11 @@
 #include <pico/stdlib.h>
 #include <hardware/adc.h>
 
+// Low Y means Up and low X means Left. Flip either axis independently if the
+// joystick is mounted in the opposite direction; button mappings do not change.
+static constexpr bool JOYSTICK_INVERT_X = false;
+static constexpr bool JOYSTICK_INVERT_Y = false;
+
 struct Button {
     uint8_t mask;
     uint pin;
@@ -59,5 +64,7 @@ ControlsState controls_poll() {
     state.x = adc_read();
     adc_select_input(0);
     state.y = adc_read();
+    if (JOYSTICK_INVERT_X) state.x = 4095 - state.x;
+    if (JOYSTICK_INVERT_Y) state.y = 4095 - state.y;
     return state;
 }

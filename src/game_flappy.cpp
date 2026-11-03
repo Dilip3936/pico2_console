@@ -1,4 +1,5 @@
 #include "game.h"
+#include "console.h"
 #include "multiplayer.h"
 #include "graphics.h"
 #include "flappy_assets.h"
@@ -298,13 +299,16 @@ void flappy_update(const InputState& input) {
         (input.controls.pressed & actions) != 0,
         (input.second_player_controls.pressed & actions) != 0
     };
-    bool btn_a_pressed = flap[0] || (racing && flap[1]);
     Bird& bird = birds[0];
 
     if (current_state == TITLE) {
-        if (input.controls.pressed & (CONTROL_C | CONTROL_D)) {
+        if (input.menu.back) {
+            console_return_to_selection();
+            return;
+        }
+        if (input.menu.up || input.menu.down) {
             racing = !racing;
-        } else if (input.controls.pressed & (CONTROL_A | CONTROL_B)) {
+        } else if (input.menu.select) {
             if (racing) {
                 multiplayer_open(FLAPPY_GAME_ID);
                 multiplayer_set_receiver(receive_network_packet);
@@ -319,7 +323,7 @@ void flappy_update(const InputState& input) {
         if (!racing && bird.y < BIRD_GROUND_Y) {
             update_bird(bird);
         }
-        if (btn_a_pressed) {
+        if (input.menu.select || input.menu.back) {
             current_state = TITLE;
         }
     }
@@ -491,9 +495,15 @@ void flappy_multiplayer_update(const InputState& input) {
         anim_timer = 0;
         network_state.scene_initialized = true;
     }
+    if (input.menu.back && (current_state != PLAYING || network_state.paused)) {
+        console_return_to_selection();
+        abort_network_game();
+        return;
+    }
     const uint8_t pressed = input.controls.pressed;
-    const bool ready_press = (pressed & (CONTROL_A | CONTROL_B)) != 0;
-    const bool pause_press = (pressed & CONTROL_E) != 0;
+    const bool ready_press = input.menu.select;
+    const bool pause_press = (pressed & CONTROL_E) != 0 ||
+                             (network_state.paused && input.menu.select);
     const bool flap_press = (pressed & (CONTROL_A | CONTROL_B | CONTROL_C | CONTROL_D)) != 0;
     if (network_state.role == MultiplayerRole::joiner) {
         if (!network_state.have_state) return;
@@ -626,7 +636,7 @@ void flappy_draw(const char*) {
         draw_centered_text(36, "FLAPPY PICO", 0x0000);
         draw_centered_text(54, network_state.ready[0] ? "P1: READY" : "P1: WAITING", 0x0000);
         draw_centered_text(70, network_state.ready[1] ? "P2: READY" : "P2: WAITING", 0x0000);
-        draw_centered_text(94, "A/B: READY", 0x0000);
+        draw_centered_text(94, "B/K: READY  D: BACK", 0x0000);
         draw_centered_text(190, network_state.role == MultiplayerRole::host ?
                            "YOU: P1  WAITING FOR PEER" : "YOU: P2  WAITING FOR HOST", 0xFFFF);
     } else if (current_state == TITLE) {
@@ -635,7 +645,8 @@ void flappy_draw(const char*) {
         draw_centered_text(40, "FLAPPY PICO", 0x0000);
         draw_centered_text(58, racing ? "  SINGLE PLAYER" : "> SINGLE PLAYER", 0x0000);
         draw_centered_text(74, racing ? "> MULTIPLAYER" : "  MULTIPLAYER", 0x0000);
-        draw_centered_text(96, "C/D: MODE  A/B: OPEN", 0x0000);
+        draw_centered_text(96, "A/C OR STICK: MODE", 0x0000);
+        draw_centered_text(150, "B/K: SELECT  D: BACK", 0xFFFF);
         if (racing) draw_centered_text(174, "HOST/JOIN ON NEXT SCREEN", 0xFFFF);
     } else if (current_state == GAME_OVER) {
         draw_filled_rect(90, 48, 140, 88, 0xFFFF);
@@ -645,26 +656,29 @@ void flappy_draw(const char*) {
         draw_centered_text(64, result, 0x0000);
         snprintf(buffer, sizeof(buffer), "SCORE:%d", score);
         draw_centered_text(88, buffer, 0x0000);
-        if (network_game_active()) snprintf(buffer, sizeof(buffer), "A/B: REMATCH READY");
-        else if (racing) snprintf(buffer, sizeof(buffer), "SPACE / V: TITLE");
+        if (network_game_active()) snprintf(buffer, sizeof(buffer), "B/K: REMATCH READY");
+        else if (racing) snprintf(buffer, sizeof(buffer), "B/K OR D: TITLE");
         else snprintf(buffer, sizeof(buffer), "BEST:%d", highscore);
         draw_centered_text(112, buffer, 0x0000);
         if (network_game_active()) {
             snprintf(buffer, sizeof(buffer), "P1:%s  P2:%s",
                      network_state.ready[0] ? "READY" : "WAIT", network_state.ready[1] ? "READY" : "WAIT");
             draw_centered_text(152, buffer, 0xFFFF);
+            draw_centered_text(174, "D: BACK", 0xFFFF);
+        } else if (!racing) {
+            draw_centered_text(152, "B/K OR D: TITLE", 0xFFFF);
         }
     } else {
         snprintf(buffer, sizeof(buffer), "%d", score);
         draw_centered_text(12, buffer, 0xFFFF);
         if (network_game_active()) {
             draw_text(4, 16, network_state.role == MultiplayerRole::host ? "YOU: P1" : "YOU: P2", 0xFFFF);
-            draw_centered_text(198, "A/B/C/D: FLAP  E: PAUSE", 0xFFFF);
+            draw_centered_text(198, network_state.paused ? "D: BACK" : "A/B/C/D: FLAP  E: PAUSE", 0xFFFF);
             if (network_state.paused) {
                 draw_filled_rect(90, 80, 140, 48, 0xFFFF);
                 draw_rect(90, 80, 140, 48, 0x0000);
                 draw_centered_text(92, "PAUSED", 0x0000);
-                draw_centered_text(112, "E: RESUME", 0x0000);
+                draw_centered_text(112, "B/K OR E: RESUME", 0x0000);
             }
         } else if (racing) {
             draw_text(4, 16, "P1: SPACE", 0xFFFF);
