@@ -39,6 +39,8 @@ target_compile_definitions(cpu_profile PRIVATE PICO_BUILD=1)
 target_compile_features(cpu_profile PRIVATE cxx_std_14)
 target_include_directories(cpu_profile PRIVATE ../include)
 file(GLOB PROFILE_GAMES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../src/game_*.cpp")
+# Match the main firmware catalogue while Pong is simulator-only.
+list(REMOVE_ITEM PROFILE_GAMES "${CMAKE_CURRENT_SOURCE_DIR}/../src/game_pong.cpp")
 list(SORT PROFILE_GAMES)
 set(PROFILE_REGISTRY "#include \"console.h\"\n")
 set(PROFILE_ENTRIES "")

@@ -10,6 +10,8 @@ uint8_t button_for_key(SDL_Keycode key) {
         case SDLK_SPACE: return CONTROL_A;
         case SDLK_x: return CONTROL_B;
         case SDLK_v: return CONTROL_A;
+        case SDLK_w: return CONTROL_A;
+        case SDLK_s: return CONTROL_C;
         case SDLK_c: return CONTROL_C;
         case SDLK_d: return CONTROL_D;
         case SDLK_p: return CONSOLE_PAUSE_BUTTON;
@@ -23,7 +25,8 @@ void handle_key(InputState& input, const SDL_KeyboardEvent& key) {
     if (key.repeat) return;
     bool pressed = key.type == SDL_KEYDOWN;
     uint8_t button = button_for_key(key.keysym.sym);
-    ControlsState& controls = key.keysym.sym == SDLK_v ? input.second_player_controls : input.controls;
+    const bool second_player = key.keysym.sym == SDLK_v || key.keysym.sym == SDLK_w || key.keysym.sym == SDLK_s;
+    ControlsState& controls = second_player ? input.second_player_controls : input.controls;
     if (pressed) {
         controls.pressed |= button & ~controls.held;
         controls.held |= button;
