@@ -1,5 +1,26 @@
 #pragma once
 #include <stdint.h>
+#include "speaker.h"
+
+namespace flappy_sounds {
+constexpr SpeakerTone flap_notes[] = {{700, 12}, {900, 12}, {1150, 12}, {1450, 16}};
+constexpr SpeakerTone score_notes[] = {{1200, 55}, {0, 25}, {1800, 90}};
+constexpr SpeakerTone crash_notes[] = {{500, 35}, {400, 35}, {300, 40}, {200, 50}, {120, 80}};
+constexpr SpeakerTone high_score_notes[] = {
+    {784, 80}, {0, 20}, {988, 80}, {0, 20}, {1175, 80}, {0, 20}, {1568, 180}
+};
+
+constexpr auto flap_pcm = speaker_make_pcm<speaker_sample_count(flap_notes)>(flap_notes);
+constexpr auto score_pcm = speaker_make_pcm<speaker_sample_count(score_notes)>(score_notes);
+constexpr auto crash_pcm = speaker_make_pcm<speaker_sample_count(crash_notes)>(crash_notes);
+constexpr auto high_score_pcm = speaker_make_pcm<speaker_sample_count(high_score_notes)>(high_score_notes);
+// Higher-priority events replace minor ones, never delaying gameplay or queuing
+// old sounds. A new-high-score jingle replaces the normal crash effect.
+constexpr SpeakerSound flap = {flap_pcm.samples, speaker_sample_count(flap_notes), 1};
+constexpr SpeakerSound score = {score_pcm.samples, speaker_sample_count(score_notes), 2};
+constexpr SpeakerSound crash = {crash_pcm.samples, speaker_sample_count(crash_notes), 3};
+constexpr SpeakerSound high_score = {high_score_pcm.samples, speaker_sample_count(high_score_notes), 4};
+} // namespace flappy_sounds
 
 const uint16_t pipe_middle[256] = {
 0xF81F, 0xF81F, 0x0000, 0x1322, 0x7EEB, 0x35A6, 0x35A6, 0x2444, 0x2444, 0x35A6, 0x7EEB, 0x35A6, 0x1322, 0x0000, 0xF81F, 0xF81F, 

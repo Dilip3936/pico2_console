@@ -36,7 +36,7 @@ target_include_directories(nrf_delivery_test PRIVATE ../include)
 target_compile_features(nrf_delivery_test PRIVATE cxx_std_14)
 
 # The profiler runs the current console and games, not a synthetic workload.
-add_pico_test(cpu_profile cpu_profile.cpp hardware_spi hardware_adc hardware_dma)
+add_pico_test(cpu_profile cpu_profile.cpp hardware_spi hardware_adc hardware_dma hardware_pwm hardware_clocks)
 target_compile_definitions(cpu_profile PRIVATE PICO_BUILD=1)
 target_compile_features(cpu_profile PRIVATE cxx_std_14)
 target_include_directories(cpu_profile PRIVATE ../include)
@@ -59,7 +59,7 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/profile_game_registr
     CONTENT "${PROFILE_REGISTRY}")
 target_sources(cpu_profile PRIVATE
     ../src/console.cpp ../src/multiplayer.cpp ../src/graphics.cpp
-    ../src/display.cpp ../src/controls.cpp ../src/radio.cpp
+    ../src/display.cpp ../src/controls.cpp ../src/radio.cpp ../src/speaker.cpp
     ${PROFILE_GAMES}
     "${CMAKE_CURRENT_BINARY_DIR}/generated/profile_game_registry.cpp"
 )

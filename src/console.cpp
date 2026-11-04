@@ -1,6 +1,7 @@
 #include "console.h"
 #include "multiplayer.h"
 #include "graphics.h"
+#include "speaker.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -65,6 +66,7 @@ void draw_menu() {
 }
 
 void console_init(const char* prompt) {
+    speaker_stop();
     multiplayer_close();
     active_game = nullptr;
     selected_game = 0;
@@ -77,6 +79,7 @@ void console_init(const char* prompt) {
 }
 
 void console_return_to_selection() {
+    speaker_stop();
     multiplayer_close();
     active_game = nullptr;
     paused = false;
@@ -131,6 +134,7 @@ void console_update(const InputState& input) {
     }
 
     if (pressed & CONSOLE_PAUSE_BUTTON) {
+        speaker_stop();
         paused = !paused;
         full_refresh = true; // We need a full frame to erase the pause overlay on resume.
         return;

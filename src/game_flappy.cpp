@@ -149,6 +149,7 @@ static void discard_flaps() {
 }
 
 static void abort_network_game() {
+    speaker_stop();
     network_state = FlappyNetworkState{};
     current_state = TITLE;
     race_winner = -1;
@@ -185,6 +186,7 @@ static void spawn_pipe(int index, float x_pos) {
 }
 
 static void reset_game() {
+    speaker_stop();
     for (Bird& bird : birds) bird = {DISPLAY_HEIGHT / 2.0f, 0};
     race_winner = -1;
     score = 0;
@@ -246,6 +248,8 @@ static void update_bird(Bird& bird) {
 }
 
 static void advance_playing(const bool flap[2]) {
+    // This path simulates P1 locally (single player or host); P2's flap is silent.
+    if (flap[0]) speaker_play(flappy_sounds::flap);
     for (int player = 0; player < (racing ? 2 : 1); ++player) {
         if (flap[player]) birds[player].velocity = JUMP_STRENGTH;
         update_bird(birds[player]);
@@ -257,6 +261,7 @@ static void advance_playing(const bool flap[2]) {
         if (!pipes[i].passed && pipes[i].x + PIPE_WIDTH < BIRD_X) {
             pipes[i].passed = true;
             score++;
+            speaker_play(flappy_sounds::score);
         }
 
         if (pipes[i].x < -PIPE_WIDTH) {
@@ -282,6 +287,9 @@ static void advance_playing(const bool flap[2]) {
         if (!racing && score > highscore) {
             highscore = score;
             save_highscore();
+            speaker_play(flappy_sounds::high_score);
+        } else {
+            speaker_play(flappy_sounds::crash);
         }
         current_state = GAME_OVER;
     }
@@ -324,6 +332,7 @@ void flappy_update(const InputState& input) {
             update_bird(bird);
         }
         if (input.menu.select || input.menu.back) {
+            speaker_stop();
             current_state = TITLE;
         }
     }
@@ -395,6 +404,9 @@ static bool receive_state(uint16_t tick, const uint8_t* body, uint64_t now_us,
         next.handled_control = control_ack;
     }
 
+    const bool had_state = network_state.session == next.session && network_state.have_state;
+    const GameState previous_phase = current_state;
+    const int previous_score = score;
     next.tick = tick;
     next.have_state = true;
     next.state_time = now_us;
@@ -410,6 +422,15 @@ static bool receive_state(uint16_t tick, const uint8_t* body, uint64_t now_us,
     race_winner = int(winner) - 1;
     score = read_u16(body + 17);
     anim_frame = body[20];
+    // Only accepted, newer snapshots produce shared effects. The first snapshot
+    // establishes a baseline, not a backlog of sounds from before joining.
+    if (!had_state || network_state.paused || current_state == TITLE ||
+        (current_state == PLAYING && previous_phase != PLAYING)) {
+        speaker_stop();
+    } else if (previous_phase == PLAYING) {
+        if (current_state == GAME_OVER) speaker_play(flappy_sounds::crash);
+        else if (score > previous_score) speaker_play(flappy_sounds::score);
+    }
     publish_input();
     return true;
 }
@@ -516,6 +537,8 @@ void flappy_multiplayer_update(const InputState& input) {
             uint16_t id = uint16_t(network_state.next_flap + 1);
             network_state.next_flap = id;
             network_state.flaps[network_state.flap_count++] = {id, network_state.tick};
+            // Submission feedback only; the host can still discard a late flap.
+            speaker_play(flappy_sounds::flap);
         }
         publish_input();
         return;
@@ -558,6 +581,7 @@ void flappy_multiplayer_update(const InputState& input) {
         network_state.flap_floor = network_state.tick;
         network_state.flap_floor_active = true;
         if (network_state.paused) {
+            speaker_stop();
             publish_state();
             return;
         }

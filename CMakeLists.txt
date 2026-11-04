@@ -29,6 +29,7 @@ else()
         src/display.cpp
         src/controls.cpp
         src/radio.cpp
+        src/speaker.cpp
     )
     set(CONSOLE_TARGET pico_game)
 
@@ -42,6 +43,8 @@ else()
         hardware_spi
         hardware_adc
         hardware_dma
+        hardware_pwm
+        hardware_clocks
     )
 
     pico_enable_stdio_usb(pico_game 1)

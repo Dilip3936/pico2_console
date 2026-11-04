@@ -4,10 +4,12 @@
 #include "graphics.h"
 #include "display.h"
 #include "multiplayer.h"
+#include "speaker.h"
 
 int main() {
     stdio_usb_init();
     controls_init();
+    speaker_init();
 
     // We wait for the USB serial monitor before printing startup messages.
     sleep_ms(2000);
@@ -43,6 +45,7 @@ int main() {
         pending_pressed |= controls.pressed;
         pending_released |= controls.released;
         multiplayer_service(time_us_64());
+        speaker_service();
         uint64_t current_time = time_us_64();
         
         bool busy = display_busy();
