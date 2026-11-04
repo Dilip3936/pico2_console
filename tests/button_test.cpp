@@ -26,7 +26,7 @@ int main() {
     sleep_ms(2000);
     printf("Button test: A=GP5 B=GP8 C=GP4 D=GP7 E=GP3 F=GP6 K=GP2\n");
     printf("Press each button; K is the joystick press.\n");
-    printf("Joystick: X=GP27/ADC1 Y=GP26/ADC0, raw range 0-4095.\n");
+    printf("Joystick: X=GP27/ADC1 Y=GP26/ADC0, range 0-4095; controls.cpp inversion applied.\n");
 
     uint64_t last_status = time_us_64();
     uint64_t last_joystick = last_status;

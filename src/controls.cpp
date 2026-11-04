@@ -5,7 +5,7 @@
 // Low Y means Up and low X means Left. Flip either axis independently if the
 // joystick is mounted in the opposite direction; button mappings do not change.
 static constexpr bool JOYSTICK_INVERT_X = false;
-static constexpr bool JOYSTICK_INVERT_Y = false;
+static constexpr bool JOYSTICK_INVERT_Y = true;
 
 struct Button {
     uint8_t mask;

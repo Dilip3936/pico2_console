@@ -54,10 +54,6 @@ endif()
 # We use each game filename as its descriptor name in the generated list.
 # CONFIGURE_DEPENDS picks up added or removed games on the next build.
 file(GLOB GAME_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/game_*.cpp")
-# Pong currently has local simulator controls only; keep it out of firmware.
-if(PICO_BUILD)
-    list(REMOVE_ITEM GAME_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game_pong.cpp")
-endif()
 list(SORT GAME_SOURCES)
 set(GAME_DECLARATIONS "")
 set(GAME_ENTRIES "")
