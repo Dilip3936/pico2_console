@@ -19,6 +19,8 @@ function(add_pico_test name source)
 endfunction()
 
 # Register each test with only the hardware libraries it needs.
+add_pico_test(speaker_test speaker_test.cpp hardware_pwm hardware_clocks)
+
 add_pico_test(button_test button_test.cpp hardware_adc)
 target_sources(button_test PRIVATE ../src/controls.cpp)
 target_include_directories(button_test PRIVATE ../include)

@@ -60,6 +60,18 @@ sequence streak. Its expected count includes leading/trailing losses and assumes
 the sender completed all 1,000 submissions. No-ACK `sent_unconfirmed` is local
 completion only. USB reports replace RF echoes; no one-way latency is measured.
 
+## Speaker diagnostic
+
+Build with `cmake --build build_test --target speaker_test -j4` to produce
+`build_test/speaker_test.uf2`. This image does not initialize games, display or radio.
+With power disconnected, connect the SmartElex module VCC to 3V3, GND to GND,
+and VIN/SIGNAL to GP22 (physical pin 29). Start with low module volume.
+It is silent at boot. Over USB serial, send `1`, `2` or `3` for a 200 ms
+440/880/1320 Hz tone, `T` for a three-tone sequence, `S` to stop or `H` for help.
+Hardware PWM generates tones; the main loop advances durations without blocking
+for each tone. USB disconnect also stops playback. Actual sound output and power
+stability remain unverified. Restore normal game firmware after testing.
+
 ## Reusable task profiler
 
 ```sh
