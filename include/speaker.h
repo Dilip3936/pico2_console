@@ -43,13 +43,26 @@ constexpr SpeakerPcm<Samples> speaker_make_pcm(const SpeakerTone (&notes)[Notes]
 void speaker_init();
 // Call frequently to silence the output after DMA finishes; never waits for audio.
 void speaker_service();
+// Also settles a completed DMA transfer before reporting playback state.
+bool speaker_is_playing();
 // One voice, no queue. Equal/higher priority replaces the current sound.
 void speaker_play(const SpeakerSound& sound);
 void speaker_stop();
 #else
-// The simulator shares game code but does not initialize or produce audio.
+namespace speaker_detail {
+// An optional simulator backend can register without becoming a link dependency.
+using SimulatorService = void (*)();
+inline SimulatorService& simulator_service() { static SimulatorService service = nullptr; return service; }
+}
+inline void speaker_set_simulator_service(speaker_detail::SimulatorService service) {
+    speaker_detail::simulator_service() = service;
+}
+// Standard sound effects stay silent; service can drive an optional local backend.
 inline void speaker_init() {}
-inline void speaker_service() {}
+inline void speaker_service() {
+    if (auto service = speaker_detail::simulator_service()) service();
+}
+inline bool speaker_is_playing() { return false; }
 inline void speaker_play(const SpeakerSound&) {}
 inline void speaker_stop() {}
 #endif

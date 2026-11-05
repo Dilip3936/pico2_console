@@ -64,6 +64,11 @@ void speaker_service() {
     if (playing && !dma_channel_is_busy(audio_dma)) speaker_stop();
 }
 
+bool speaker_is_playing() {
+    speaker_service();
+    return playing;
+}
+
 void speaker_play(const SpeakerSound& sound) {
     // RP2350 uses the upper four transfer-count bits for DMA modes, not length.
     if (!speaker_is_enabled() || audio_dma < 0 || !sound.samples || !sound.sample_count ||

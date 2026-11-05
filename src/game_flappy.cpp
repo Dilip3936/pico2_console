@@ -3,6 +3,7 @@
 #include "multiplayer.h"
 #include "graphics.h"
 #include "flappy_assets.h"
+#include "font.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -651,6 +652,31 @@ static void draw_centered_text(int y, const char* text, uint16_t color) {
     draw_text((DISPLAY_WIDTH - (int)strlen(text) * 6) / 2, y, text, color);
 }
 
+static void draw_score(const char* text) {
+    constexpr int scale = 3;
+    constexpr int y = 20;
+    int x = (DISPLAY_WIDTH - (int)strlen(text) * 6 * scale + scale) / 2;
+    for (const char* p = text; *p; ++p, x += 6 * scale) {
+        const uint8_t* glyph = font5x7[(unsigned char)*p - 32];
+        // Lay the shadow first so neighboring glyph pixels cannot cover the face.
+        for (int col = 0; col < 5; ++col) {
+            for (int row = 0; row < 7; ++row) {
+                if (glyph[col] & (1 << row)) {
+                    draw_filled_rect(x + col * scale + 1, y + row * scale + 1,
+                                     scale + 1, scale + 1, 0x0000);
+                }
+            }
+        }
+        for (int col = 0; col < 5; ++col) {
+            for (int row = 0; row < 7; ++row) {
+                if (glyph[col] & (1 << row)) {
+                    draw_filled_rect(x + col * scale, y + row * scale, scale, scale, 0xFFFF);
+                }
+            }
+        }
+    }
+}
+
 void flappy_draw(const char*) {
     draw_playfield();
     char buffer[32];
@@ -694,7 +720,7 @@ void flappy_draw(const char*) {
         }
     } else {
         snprintf(buffer, sizeof(buffer), "%d", score);
-        draw_centered_text(12, buffer, 0xFFFF);
+        draw_score(buffer);
         if (network_game_active()) {
             draw_text(4, 16, network_state.role == MultiplayerRole::host ? "YOU: P1" : "YOU: P2", 0xFFFF);
             draw_centered_text(198, network_state.paused ? "D: BACK" : "A/B/C/D: FLAP  E: PAUSE", 0xFFFF);
@@ -728,5 +754,5 @@ void flappy_debug() {
 
 extern const Game game_flappy = {
     "Flappy Bird", flappy_init, flappy_update, flappy_draw,
-    GROUND_Y, flappy_debug, flappy_multiplayer_update
+    0, flappy_debug, flappy_multiplayer_update
 };

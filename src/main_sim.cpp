@@ -2,9 +2,11 @@
 #include "graphics.h"
 #include "console.h"
 #include "multiplayer.h"
+#include "speaker.h"
 #include <stdio.h>
 
 extern const Game game_grid_blasters;
+
 
 namespace {
 bool uses_twin_stick_controls() {
@@ -172,6 +174,7 @@ int main() {
             input.second_player_controls.released = 0;
             last_logic_time += frame_delay;
         }
+        speaker_service();
         console_draw();
 
         char buffer[32];
@@ -203,7 +206,8 @@ int main() {
         }
     }
 
-    multiplayer_close();
+    console_return_to_selection();
+    speaker_service();
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
