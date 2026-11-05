@@ -48,13 +48,18 @@ void draw_menu() {
 
     const size_t page_size = 6;
     const size_t first = selected_game / page_size * page_size;
-    for (size_t i = first; i < registered_game_count && i < first + page_size; ++i) {
+    // The final menu entry controls audio for every game on this console.
+    for (size_t i = first; i <= registered_game_count && i < first + page_size; ++i) {
         int y = 50 + (int)(i - first) * 22;
         if (i == selected_game) {
             draw_filled_rect(16, y - 4, DISPLAY_WIDTH - 32, 18, 0xFFFF);
         }
         char title[45];
-        snprintf(title, sizeof(title), "%.44s", registered_games[i]->name);
+        if (i == registered_game_count) {
+            snprintf(title, sizeof(title), "SOUND: %s", speaker_is_enabled() ? "ON" : "OFF");
+        } else {
+            snprintf(title, sizeof(title), "%.44s", registered_games[i]->name);
+        }
         centered_text(y, title, i == selected_game ? 0x0000 : 0xFFFF);
     }
 
@@ -99,14 +104,17 @@ void console_update(const InputState& input) {
     }
 
     if (!active_game) {
-        if (registered_game_count == 0) return;
         if (menu.up) {
-            selected_game = selected_game == 0 ? registered_game_count - 1 : selected_game - 1;
+            selected_game = selected_game == 0 ? registered_game_count : selected_game - 1;
         } else if (menu.down) {
-            selected_game = (selected_game + 1) % registered_game_count;
+            selected_game = (selected_game + 1) % (registered_game_count + 1);
         } else if (menu.select) {
-            active_game = registered_games[selected_game];
-            active_game->init();
+            if (selected_game == registered_game_count) {
+                speaker_set_enabled(!speaker_is_enabled());
+            } else {
+                active_game = registered_games[selected_game];
+                active_game->init();
+            }
             full_refresh = true;
         }
         return;

@@ -2,6 +2,7 @@
 #include "graphics.h"
 #include "console.h"
 #include "multiplayer.h"
+#include "pong_assets.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -93,6 +94,8 @@ struct Ball {
 
 };
 Phase phase;
+bool choosing_players = true;
+bool single_player = true;
 int selected_mode;
 Ball balls[MAX_BALLS];
 float paddle_y[2];
@@ -124,6 +127,9 @@ PongNetworkState network;
 bool receive_network_packet(MultiplayerPacketType, uint16_t, const uint8_t*, uint64_t);
 void publish_input(int direction);
 bool network_game() { return network.session != 0; }
+int paddle_height(int player) {
+    return single_player && player == 1 ? ARENA_BOTTOM - ARENA_TOP : PADDLE_HEIGHT;
+}
 
 // The compact STATE body has fixed field widths; reject incompatible tuning at build time.
 static_assert(MAX_BALLS == 3 && WINNING_SCORE <= 7 && MODE_COUNT == 4 &&
@@ -173,8 +179,10 @@ void spawn_ball(Ball& ball) {
 }
 
 void clear_match() {
+    speaker_stop();
     countdown_ticks = 0;
-    score[0] = score[1] = 0;
+    score[0] = single_player ? WINNING_SCORE : 0;
+    score[1] = 0;
     last_scorer = -1;
     paddle_y[0] = paddle_y[1] = CENTER_Y;
     paddle_velocity[0] = paddle_velocity[1] = 0;
@@ -205,13 +213,10 @@ void init() {
     serve_random.seed(static_cast<unsigned>(std::chrono::steady_clock::now().time_since_epoch().count()));
 #endif
     network = {};
+    choosing_players = single_player = true;
     selected_mode = 0;
     phase = Phase::choosing;
     clear_match();
-#ifdef PICO_BUILD
-    multiplayer_open(PONG_GAME_ID);
-    multiplayer_set_receiver(receive_network_packet);
-#endif
 }
 
 int paddle_direction(const ControlsState& controls, bool up = false, bool down = false) {
@@ -224,7 +229,7 @@ void rebound(Ball& ball, int player) {
     float speed = std::sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
     if (selected_mode == 0) speed = std::min(speed + LEVEL_1_SPEED_PER_HIT, LEVEL_1_MAX_SPEED);
         else if (MODES[selected_mode].accelerates) speed = std::min(speed + SPEED_PER_HIT, MAX_BALL_SPEED);
-    float vertical = (ball.y - paddle_y[player]) / (PADDLE_HEIGHT / 2.0f);
+    float vertical = (ball.y - paddle_y[player]) / (paddle_height(player) / 2.0f);
     vertical = std::max(-1.0f, std::min(vertical, 1.0f)) * MAX_REBOUND_VERTICAL;
     vertical += paddle_velocity[player] / PADDLE_SPEED * PADDLE_SPIN_STRENGTH;
     vertical = std::max(-MAX_REBOUND_VERTICAL, std::min(vertical, MAX_REBOUND_VERTICAL));
@@ -235,6 +240,7 @@ void rebound(Ball& ball, int player) {
     }
     ball.vy = speed * vertical;
     ball.vx = speed * std::sqrt(1.0f - vertical * vertical) * (player == 0 ? 1 : -1);
+    speaker_play(pong_sounds::paddle);
 }
 
 void move_ball(Ball& ball, float dt) {
@@ -246,25 +252,28 @@ void move_ball(Ball& ball, float dt) {
     if (ball.y < top) {
         ball.y = 2 * top - ball.y;
         ball.vy = std::fabs(ball.vy);
+        speaker_play(pong_sounds::wall);
     } else if (ball.y > bottom) {
         ball.y = 2 * bottom - ball.y;
         ball.vy = -std::fabs(ball.vy);
+        speaker_play(pong_sounds::wall);
     }
 
     const int player = ball.vx < 0 ? 0 : 1;
     const float contact = player == 0 ? LEFT_FACE + BALL_RADIUS : RIGHT_FACE - BALL_RADIUS;
     const bool crossed = player == 0 ? previous_x >= contact && ball.x <= contact
                                      : previous_x <= contact && ball.x >= contact;
-    if (crossed && std::fabs(ball.y - paddle_y[player]) <= PADDLE_HEIGHT / 2.0f + BALL_RADIUS) {
+    if (crossed && std::fabs(ball.y - paddle_y[player]) <= paddle_height(player) / 2.0f + BALL_RADIUS) {
         ball.x = contact;
         rebound(ball, player);
     }
     if (ball.x <= -BALL_RADIUS || ball.x >= DISPLAY_WIDTH + BALL_RADIUS) {
         const int missed = ball.x < 0 ? 0 : 1;
-        score[1 - missed] = std::min(score[1 - missed] + 1, WINNING_SCORE);
+        if (single_player) score[0] = std::max(0, score[0] - 1);
+        else score[1 - missed] = std::min(score[1 - missed] + 1, WINNING_SCORE);
         ball.active = false;
         last_scorer = 1 - missed;
-
+        speaker_play(pong_sounds::point);
     }
 }
 
@@ -282,7 +291,7 @@ void advance_playing(int first_direction, int second_direction) {
     const int steps = std::max(1, int(std::ceil(fastest / GAME_FPS)));
     const float dt = 1.0f / (GAME_FPS * steps);
     for (int step = 0; step < steps; ++step) {
-        for (int player = 0; player < 2; ++player) {
+        for (int player = 0; player < (single_player ? 1 : 2); ++player) {
             const float previous_y = paddle_y[player];
             paddle_y[player] += direction[player] * PADDLE_SPEED * dt;
             paddle_y[player] = std::max(ARENA_TOP + PADDLE_HEIGHT / 2.0f,
@@ -292,8 +301,10 @@ void advance_playing(int first_direction, int second_direction) {
         for (Ball& ball : balls) if (ball.active) move_ball(ball, dt);
     }
     // Resolve the whole tick before declaring a winner, independent of ball order.
-    if (score[0] >= WINNING_SCORE || score[1] >= WINNING_SCORE) {
+    if (single_player ? score[0] == 0 :
+                        score[0] >= WINNING_SCORE || score[1] >= WINNING_SCORE) {
         phase = Phase::result;
+        speaker_play(pong_sounds::match_end);
         return;
     }
 
@@ -312,26 +323,49 @@ void advance_playing(int first_direction, int second_direction) {
 }
 
 void update(const InputState& input) {
-#ifdef PICO_BUILD
-    // Pico Pong is wireless-only; Back from Host/Join returns to the console.
-    if (multiplayer_state() == MultiplayerState::closed) console_return_to_selection();
-#else
-    if (phase == Phase::choosing) {
+    if (choosing_players) {
         if (input.menu.back) console_return_to_selection();
+        else if (input.menu.up || input.menu.down) single_player = !single_player;
+        else if (input.menu.select) {
+            choosing_players = false;
+            clear_match();
+#ifdef PICO_BUILD
+            if (!single_player) {
+                multiplayer_open(PONG_GAME_ID);
+                multiplayer_set_receiver(receive_network_packet);
+            }
+#endif
+        }
+        return;
+    }
+#ifdef PICO_BUILD
+    if (!single_player) {
+        // Closing Host/Join returns to the player-count selection.
+        if (multiplayer_state() == MultiplayerState::closed) {
+            network = {};
+            clear_match();
+            phase = Phase::choosing;
+            choosing_players = true;
+        }
+        return;
+    }
+#endif
+    if (phase == Phase::choosing) {
+        if (input.menu.back) { choosing_players = true; speaker_stop(); }
         else if (input.menu.up) selected_mode = (selected_mode + MODE_COUNT - 1) % MODE_COUNT;
         else if (input.menu.down) selected_mode = (selected_mode + 1) % MODE_COUNT;
         else if (input.menu.select) begin_countdown();
     } else if (phase == Phase::result) {
-        if (input.menu.back) phase = Phase::choosing;
+        if (input.menu.back) { phase = Phase::choosing; speaker_stop(); }
         else if (input.menu.select) begin_countdown();
     } else if (phase == Phase::ready) {
         if (input.menu.back) { countdown_ticks = 0; phase = Phase::choosing; }
         else if (countdown_ticks > 0 && --countdown_ticks == 0) start_match();
     } else if (phase == Phase::playing) {
-        advance_playing(paddle_direction(input.second_player_controls),
-                        paddle_direction(input.controls, input.up, input.down));
+        if (single_player) advance_playing(paddle_direction(input.controls, input.up, input.down), 0);
+        else advance_playing(paddle_direction(input.second_player_controls),
+                             paddle_direction(input.controls, input.up, input.down));
     }
-#endif
 }
 
 uint16_t read_u16(const uint8_t* p) { return uint16_t(p[0]) | (uint16_t(p[1]) << 8); }
@@ -409,6 +443,29 @@ bool receive_state(uint16_t tick, const uint8_t* body, PongNetworkState next) {
     const uint8_t ack = body[23] & 0x7f;
     if (next.pending && ack == next.control_id) next.pending = false;
     else if (ack != next.acknowledged) return false;
+    // Snapshot cues need no extra radio fields. Only adjacent playing snapshots
+    // identify bounces: a gap can hide a miss/respawn or multiple direction changes.
+    if (!next.have_state || paused || incoming_phase == Phase::choosing ||
+        incoming_phase == Phase::ready ||
+        (incoming_phase == Phase::playing && phase != Phase::playing)) {
+        speaker_stop();
+    } else if (incoming_phase == Phase::result && phase == Phase::playing) {
+        speaker_play(pong_sounds::match_end);
+    } else if (incoming_phase == Phase::playing &&
+               (scores[0] > score[0] || scores[1] > score[1])) {
+        speaker_play(pong_sounds::point);
+    } else if (incoming_phase == Phase::playing && !network.paused &&
+               uint16_t(tick - next.tick) == 1 &&
+               scores[0] == score[0] && scores[1] == score[1]) {
+        bool paddle_hit = false, wall_hit = false;
+        for (int i = 0; i < MAX_BALLS; ++i) {
+            if (!balls[i].active || !received[i].active) continue;
+            if (balls[i].vx * received[i].vx < 0) paddle_hit = true;
+            else if (balls[i].vy * received[i].vy < 0) wall_hit = true;
+        }
+        if (paddle_hit) speaker_play(pong_sounds::paddle);
+        else if (wall_hit) speaker_play(pong_sounds::wall);
+    }
     next.acknowledged = ack;
     next.tick = tick;
     next.have_state = next.initialized = true;
@@ -510,6 +567,7 @@ void pong_multiplayer_update(const InputState& input) {
     }
     if (input.menu.back && (phase != Phase::playing || network.paused)) {
         if (network.role == MultiplayerRole::host && (phase == Phase::ready || phase == Phase::result)) {
+            speaker_stop();
             phase = Phase::choosing;
             countdown_ticks = 0;
             network.ready = 0;
@@ -564,7 +622,11 @@ void pong_multiplayer_update(const InputState& input) {
         }
     } else {
         if (pause_press) network.paused = !was_paused;
-        if (network.paused != was_paused) { network.phase_age = 0; network.remote_direction = 0; }
+        if (network.paused != was_paused) {
+            if (network.paused) speaker_stop();
+            network.phase_age = 0;
+            network.remote_direction = 0;
+        }
         if (!network.paused && !was_paused) {
             const uint64_t now = multiplayer_now_us();
             const int remote = network.have_input && now >= network.input_time &&
@@ -602,6 +664,17 @@ void draw_spawn_cue() {
 
 void draw(const char*) {
     clear_screen(0x0841);
+    if (choosing_players) {
+        centered_text(48, "PONG", WHITE);
+        const char* choices[] = {"SINGLE PLAYER", "MULTIPLAYER"};
+        for (int i = 0; i < 2; ++i) {
+            const bool selected = i == (single_player ? 0 : 1);
+            const int y = 100 + i * 28;
+            if (selected) draw_filled_rect(56, y - 5, 208, 18, PLAYER_COLORS[0]);
+            centered_text(y, choices[i], selected ? 0x0000 : WHITE);
+        }
+        return;
+    }
     if (network_game() && network.role == MultiplayerRole::joiner && !network.have_state) {
         centered_text(100, "WAITING FOR HOST STATE", WHITE);
         return;
@@ -609,8 +682,9 @@ void draw(const char*) {
     if (phase == Phase::choosing) {
         centered_text(28, "PONG", WHITE);
         char rules[48];
-        std::snprintf(rules, sizeof(rules), "%s - FIRST TO %d",
-                      network_game() ? "WIRELESS" : "LOCAL TWO PLAYER", WINNING_SCORE);
+        std::snprintf(rules, sizeof(rules), single_player ? "SINGLE PLAYER - %d LIVES" :
+                      network_game() ? "WIRELESS - FIRST TO %d" : "LOCAL TWO PLAYER - FIRST TO %d",
+                      WINNING_SCORE);
         centered_text(46, rules, MUTED);
         for (int i = 0; i < MODE_COUNT; ++i) {
             const int y = 72 + i * 22;
@@ -621,8 +695,11 @@ void draw(const char*) {
                                           "HOST: SELECT LEVEL" : "HOST IS SELECTING LEVEL", WHITE);
 #ifndef PICO_BUILD
         else {
-            centered_text(170, "P1: W/S", PLAYER_COLORS[0]);
-            centered_text(186, "P2: UP/DOWN OR SPACE/C (A/C)", PLAYER_COLORS[1]);
+            if (single_player) centered_text(180, "UP/DOWN OR SPACE/C (A/C): MOVE", PLAYER_COLORS[0]);
+            else {
+                centered_text(170, "P1: W/S", PLAYER_COLORS[0]);
+                centered_text(186, "P2: UP/DOWN OR SPACE/C (A/C)", PLAYER_COLORS[1]);
+            }
             centered_text(208, "UP/DOWN: MODE   X/ENTER: START", WHITE);
             centered_text(224, "D: BACK   P: PAUSE   ESC: MENU", MUTED);
         }
@@ -631,10 +708,15 @@ void draw(const char*) {
     }
 
     char text[48];
-    std::snprintf(text, sizeof(text), "P1 %d", score[0]);
-    draw_text(80, 3, text, PLAYER_COLORS[0]);
-    std::snprintf(text, sizeof(text), "P2 %d", score[1]);
-    draw_text(210, 3, text, PLAYER_COLORS[1]);
+    if (single_player) {
+        std::snprintf(text, sizeof(text), "LIVES %d", score[0]);
+        centered_text(3, text, PLAYER_COLORS[0]);
+    } else {
+        std::snprintf(text, sizeof(text), "P1 %d", score[0]);
+        draw_text(80, 3, text, PLAYER_COLORS[0]);
+        std::snprintf(text, sizeof(text), "P2 %d", score[1]);
+        draw_text(210, 3, text, PLAYER_COLORS[1]);
+    }
     centered_text(20, MODES[selected_mode].name, MUTED);
     draw_filled_rect(0, ARENA_TOP - 2, DISPLAY_WIDTH, 2, MUTED);
     draw_filled_rect(0, ARENA_BOTTOM, DISPLAY_WIDTH, 2, MUTED);
@@ -643,14 +725,15 @@ void draw(const char*) {
     draw_filled_rect(PADDLE_INSET, int(paddle_y[0] - PADDLE_HEIGHT / 2.0f),
                      PADDLE_WIDTH, PADDLE_HEIGHT, PLAYER_COLORS[0]);
     draw_filled_rect(DISPLAY_WIDTH - PADDLE_INSET - PADDLE_WIDTH,
-                     int(paddle_y[1] - PADDLE_HEIGHT / 2.0f),
-                     PADDLE_WIDTH, PADDLE_HEIGHT, PLAYER_COLORS[1]);
+                     int(paddle_y[1] - paddle_height(1) / 2.0f),
+                     PADDLE_WIDTH, paddle_height(1), PLAYER_COLORS[1]);
     for (const Ball& ball : balls) {
         if (ball.active) draw_filled_rect(int(ball.x) - BALL_RADIUS, int(ball.y) - BALL_RADIUS,
                                           BALL_RADIUS * 2, BALL_RADIUS * 2, WHITE);
     }
 #ifndef PICO_BUILD
-    if (!network_game()) centered_text(232, "P1: W/S   P2: ARROWS/SPACE/C   P: PAUSE", MUTED);
+    if (!network_game()) centered_text(232, single_player ? "UP/DOWN: MOVE   P: PAUSE" :
+                                      "P1: W/S   P2: ARROWS/SPACE/C   P: PAUSE", MUTED);
 #endif
     if (countdown_ticks > 0) {
         draw_filled_rect(65, 88, 190, 64, 0x1082);
@@ -678,8 +761,13 @@ void draw(const char*) {
     if (phase == Phase::result) {
         draw_filled_rect(35, 88, 250, 72, 0x1082);
         draw_rect(35, 88, 250, 72, WHITE);
-        centered_text(100, score[0] == score[1] ? "DRAW" : score[0] > score[1] ? "PLAYER 1 WINS" : "PLAYER 2 WINS", WHITE);
-        centered_text(122, "X/ENTER: REMATCH", WHITE);
+        centered_text(100, single_player ? "GAME OVER" :
+                      score[0] == score[1] ? "DRAW" : score[0] > score[1] ? "PLAYER 1 WINS" : "PLAYER 2 WINS", WHITE);
+#ifdef PICO_BUILD
+        centered_text(122, "B/K: PLAY AGAIN", WHITE);
+#else
+        centered_text(122, "X/ENTER: PLAY AGAIN", WHITE);
+#endif
         centered_text(142, "D: CHOOSE LEVEL", MUTED);
     }
 }

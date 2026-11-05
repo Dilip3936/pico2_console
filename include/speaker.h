@@ -53,3 +53,15 @@ inline void speaker_service() {}
 inline void speaker_play(const SpeakerSound&) {}
 inline void speaker_stop() {}
 #endif
+
+namespace speaker_detail {
+// The inline function's local static is shared across translation units in C++14.
+inline bool& enabled() { static bool value = true; return value; }
+}
+
+// Local to this console and kept across games, but not stored across reboots.
+inline bool speaker_is_enabled() { return speaker_detail::enabled(); }
+inline void speaker_set_enabled(bool enabled) {
+    speaker_detail::enabled() = enabled;
+    if (!enabled) speaker_stop();
+}
