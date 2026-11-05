@@ -164,6 +164,10 @@ void console_update(const InputState& input) {
     active_game->update(game_input);
 }
 
+const Game* console_active_game() {
+    return active_game;
+}
+
 int console_draw() {
     if (!active_game) {
         draw_menu();

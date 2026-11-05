@@ -17,3 +17,5 @@ void console_update(const InputState& input);
 // The return value tells the Pico how many top rows need transferring.
 int console_draw();
 void console_debug();
+// Null while the console is at game selection.
+const Game* console_active_game();

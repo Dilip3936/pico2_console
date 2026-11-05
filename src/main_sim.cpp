@@ -4,7 +4,68 @@
 #include "multiplayer.h"
 #include <stdio.h>
 
+extern const Game game_grid_blasters;
+
 namespace {
+bool uses_twin_stick_controls() {
+    return console_active_game() == &game_grid_blasters;
+}
+
+struct TwinStickKey {
+    SDL_Keycode key;
+    int player;
+    uint8_t direction;
+    bool movement;
+};
+const TwinStickKey twin_stick_keys[] = {
+    {SDLK_w, 0, CONTROL_A, true}, {SDLK_d, 0, CONTROL_B, true},
+    {SDLK_s, 0, CONTROL_C, true}, {SDLK_a, 0, CONTROL_D, true},
+    {SDLK_UP, 0, CONTROL_A, false}, {SDLK_RIGHT, 0, CONTROL_B, false},
+    {SDLK_DOWN, 0, CONTROL_C, false}, {SDLK_LEFT, 0, CONTROL_D, false},
+    {SDLK_LSHIFT, 0, CONTROL_K, false}, {SDLK_RETURN, 0, CONTROL_K, false},
+    {SDLK_i, 1, CONTROL_A, true}, {SDLK_l, 1, CONTROL_B, true},
+    {SDLK_k, 1, CONTROL_C, true}, {SDLK_j, 1, CONTROL_D, true},
+    {SDLK_t, 1, CONTROL_A, false}, {SDLK_h, 1, CONTROL_B, false},
+    {SDLK_g, 1, CONTROL_C, false}, {SDLK_f, 1, CONTROL_D, false},
+    {SDLK_RSHIFT, 1, CONTROL_K, false}
+};
+constexpr size_t TWIN_STICK_KEY_COUNT = sizeof(twin_stick_keys) / sizeof(twin_stick_keys[0]);
+bool twin_stick_held[TWIN_STICK_KEY_COUNT] = {};
+
+void reset_input(InputState& input) {
+    const uint8_t held = input.controls.held, second_held = input.second_player_controls.held;
+    input = {};
+    input.controls.released = held;
+    input.second_player_controls.released = second_held;
+    input.controls.x = input.controls.y = 2048;
+    input.second_player_controls.x = input.second_player_controls.y = 2048;
+    for (bool& held_key : twin_stick_held) held_key = false;
+}
+
+void handle_twin_stick_key(InputState& input, const SDL_KeyboardEvent& key) {
+    for (size_t i = 0; i < TWIN_STICK_KEY_COUNT; ++i) {
+        if (key.keysym.sym == twin_stick_keys[i].key) twin_stick_held[i] = key.type == SDL_KEYDOWN;
+    }
+    uint8_t buttons[2] = {}, movement[2] = {};
+    for (size_t i = 0; i < TWIN_STICK_KEY_COUNT; ++i) {
+        if (!twin_stick_held[i]) continue;
+        const TwinStickKey& binding = twin_stick_keys[i];
+        if (binding.movement) movement[binding.player] |= binding.direction;
+        else buttons[binding.player] |= binding.direction;
+    }
+    buttons[0] |= input.controls.held & (CONSOLE_PAUSE_BUTTON | CONSOLE_MENU_BUTTON);
+    for (int player = 0; player < 2; ++player) {
+        ControlsState& controls = player == 0 ? input.controls : input.second_player_controls;
+        controls.pressed |= buttons[player] & ~controls.held;
+        controls.released |= controls.held & ~buttons[player];
+        controls.held = buttons[player];
+        controls.x = uint16_t(2048 + 2047 * (int(bool(movement[player] & CONTROL_B)) -
+                                                          int(bool(movement[player] & CONTROL_D))));
+        controls.y = uint16_t(2048 + 2047 * (int(bool(movement[player] & CONTROL_C)) -
+                                                          int(bool(movement[player] & CONTROL_A))));
+    }
+}
+
 uint8_t button_for_key(SDL_Keycode key) {
     switch (key) {
         case SDLK_SPACE: return CONTROL_A;
@@ -23,6 +84,10 @@ uint8_t button_for_key(SDL_Keycode key) {
 
 void handle_key(InputState& input, const SDL_KeyboardEvent& key) {
     if (key.repeat) return;
+    if (uses_twin_stick_controls() && key.keysym.sym != SDLK_p && key.keysym.sym != SDLK_ESCAPE) {
+        handle_twin_stick_key(input, key);
+        return;
+    }
     bool pressed = key.type == SDL_KEYDOWN;
     uint8_t button = button_for_key(key.keysym.sym);
     const bool second_player = key.keysym.sym == SDLK_v || key.keysym.sym == SDLK_w || key.keysym.sym == SDLK_s;
@@ -66,6 +131,7 @@ int main() {
     InputState input = {};
     input.controls.x = input.controls.y = 2048; // We leave the virtual joystick centered.
     input.second_player_controls.x = input.second_player_controls.y = 2048;
+    bool twin_stick_input = false;
     bool running = true;
     int exit_code = 0;
     SDL_Event event;
@@ -87,19 +153,19 @@ int main() {
                 handle_key(input, event.key);
             }
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
-                uint8_t held = input.controls.held;
-                uint8_t second_held = input.second_player_controls.held;
-                input = {};
-                input.controls.released = held;
-                input.second_player_controls.released = second_held;
-                input.controls.x = input.controls.y = 2048;
-                input.second_player_controls.x = input.second_player_controls.y = 2048;
+                reset_input(input);
             }
         }
         if (!running) break;
 
         while (frame_start - last_logic_time >= frame_delay) {
             console_update(input);
+            const bool next_layout = uses_twin_stick_controls();
+            if (next_layout != twin_stick_input) {
+                // Held keys from a different layout must not become movement/fire.
+                reset_input(input);
+                twin_stick_input = next_layout;
+            }
             input.controls.pressed = 0;
             input.controls.released = 0;
             input.second_player_controls.pressed = 0;
