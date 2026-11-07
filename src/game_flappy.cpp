@@ -24,8 +24,16 @@ namespace {
 
 // Network game identity stays stable even if the generated game catalogue changes order.
 constexpr uint16_t FLAPPY_GAME_ID = 1;
+constexpr int COUNTDOWN_TICKS = 3 * GAME_FPS;
+constexpr int FIRST_PIPE_DELAY_TICKS = 0;
+static_assert(COUNTDOWN_TICKS > 0 && COUNTDOWN_TICKS <= 255 && FIRST_PIPE_DELAY_TICKS >= 0,
+              "Invalid Flappy start timing");
 
-enum GameState { TITLE, PLAYING, GAME_OVER };
+enum GameState { TITLE, PLAYING, GAME_OVER, COUNTDOWN };
+
+static bool round_active(GameState phase) {
+    return phase == PLAYING || phase == COUNTDOWN;
+}
 
 struct Pipe {
     float x;
@@ -37,6 +45,7 @@ static GameState current_state = TITLE;
 struct Bird {
     float y;
     float velocity;
+    bool started = false;
 };
 
 static Bird birds[2] = {};
@@ -49,6 +58,8 @@ static int highscore = 0;
 static Pipe pipes[MAX_PIPES];
 static int anim_frame = 0;
 static int anim_timer = 0;
+static int countdown_ticks = 0;
+static int first_pipe_delay = 0;
 
 static GameState last_debug_state = TITLE;
 static unsigned debug_frames = 0;
@@ -189,11 +200,23 @@ static void spawn_pipe(int index, float x_pos) {
 static void reset_game() {
     speaker_stop();
     for (Bird& bird : birds) bird = {DISPLAY_HEIGHT / 2.0f, 0};
+    countdown_ticks = 0;
+    first_pipe_delay = FIRST_PIPE_DELAY_TICKS;
     race_winner = -1;
     score = 0;
     for (int i = 0; i < MAX_PIPES; i++) {
         spawn_pipe(i, DISPLAY_WIDTH + i * PIPE_SPACING);
     }
+}
+
+static void begin_countdown() {
+    reset_game();
+    countdown_ticks = COUNTDOWN_TICKS;
+    current_state = COUNTDOWN;
+}
+
+static void advance_countdown() {
+    if (--countdown_ticks == 0) current_state = PLAYING;
 }
 
 void flappy_init() {
@@ -252,12 +275,17 @@ static void advance_playing(const bool flap[2]) {
     // This path simulates P1 locally (single player or host); P2's flap is silent.
     if (flap[0]) speaker_play(flappy_sounds::flap);
     for (int player = 0; player < (racing ? 2 : 1); ++player) {
-        if (flap[player]) birds[player].velocity = JUMP_STRENGTH;
-        update_bird(birds[player]);
+        if (flap[player]) {
+            birds[player].started = true;
+            birds[player].velocity = JUMP_STRENGTH;
+        }
+        if (birds[player].started) update_bird(birds[player]);
     }
 
+    const bool move_pipes = first_pipe_delay == 0;
+    if (first_pipe_delay > 0) --first_pipe_delay;
     for (int i = 0; i < MAX_PIPES; i++) {
-        pipes[i].x -= 5.0f;
+        if (move_pipes) pipes[i].x -= 5.0f;
 
         if (!pipes[i].passed && pipes[i].x + PIPE_WIDTH < BIRD_X) {
             pipes[i].passed = true;
@@ -299,8 +327,7 @@ static void advance_playing(const bool flap[2]) {
 void flappy_update(const InputState& input) {
     if (network_game_active() && multiplayer_state() == MultiplayerState::closed) abort_network_game();
     if (multiplayer_take_local_test() && current_state == TITLE && racing) {
-        reset_game();
-        current_state = PLAYING;
+        begin_countdown();
         return;
     }
     const uint8_t actions = CONTROL_A | CONTROL_B | CONTROL_C | CONTROL_D;
@@ -326,6 +353,8 @@ void flappy_update(const InputState& input) {
                 current_state = PLAYING;
             }
         }
+    } else if (current_state == COUNTDOWN) {
+        advance_countdown();
     } else if (current_state == PLAYING) {
         advance_playing(flap);
     } else if (current_state == GAME_OVER) {
@@ -356,7 +385,8 @@ static void publish_state() {
     body[19] = uint8_t(current_state) | (network_state.paused ? 4 : 0) |
                (network_state.ready[0] ? 8 : 0) | (network_state.ready[1] ? 16 : 0) |
                uint8_t((race_winner + 1) << 5);
-    body[20] = uint8_t(anim_frame);
+    // Countdown snapshots use the animation byte for remaining ticks; birds stay still.
+    body[20] = uint8_t(current_state == COUNTDOWN ? countdown_ticks : anim_frame);
     write_u16(body + 21, network_state.handled_flap);
     body[23] = network_state.handled_control;
     multiplayer_publish(MultiplayerPacketType::state, network_state.tick, body);
@@ -368,9 +398,11 @@ static bool receive_state(uint16_t tick, const uint8_t* body, uint64_t now_us,
     const unsigned flags = body[19];
     const unsigned phase = flags & 3;
     const unsigned winner = (flags >> 5) & 3;
-    if ((flags & 128) || phase > GAME_OVER || winner > 2 || body[20] > 2) return false;
-    if ((phase != GAME_OVER && winner) || (phase != PLAYING && (flags & 4)) ||
-        (phase == PLAYING && (flags & 24))) return false;
+    const bool counting_down = phase == COUNTDOWN;
+    if ((flags & 128) || phase > COUNTDOWN || winner > 2 ||
+        (counting_down ? (!body[20] || body[20] > COUNTDOWN_TICKS) : body[20] > 2)) return false;
+    if ((phase != GAME_OVER && winner) || (!round_active(GameState(phase)) && (flags & 4)) ||
+        (round_active(GameState(phase)) && (flags & 24))) return false;
 
     Bird next_birds[2];
     Pipe next_pipes[MAX_PIPES];
@@ -422,10 +454,11 @@ static bool receive_state(uint16_t tick, const uint8_t* body, uint64_t now_us,
     racing = true;
     race_winner = int(winner) - 1;
     score = read_u16(body + 17);
-    anim_frame = body[20];
+    countdown_ticks = counting_down ? body[20] : 0;
+    anim_frame = counting_down ? 1 : body[20];
     // Only accepted, newer snapshots produce shared effects. The first snapshot
     // establishes a baseline, not a backlog of sounds from before joining.
-    if (!had_state || network_state.paused || current_state == TITLE ||
+    if (!had_state || network_state.paused || current_state == TITLE || current_state == COUNTDOWN ||
         (current_state == PLAYING && previous_phase != PLAYING)) {
         speaker_stop();
     } else if (previous_phase == PLAYING) {
@@ -517,7 +550,7 @@ void flappy_multiplayer_update(const InputState& input) {
         anim_timer = 0;
         network_state.scene_initialized = true;
     }
-    if (input.menu.back && (current_state != PLAYING || network_state.paused)) {
+    if (input.menu.back && (!round_active(current_state) || network_state.paused)) {
         console_return_to_selection();
         abort_network_game();
         return;
@@ -529,11 +562,11 @@ void flappy_multiplayer_update(const InputState& input) {
     const bool flap_press = (pressed & (CONTROL_A | CONTROL_B | CONTROL_C | CONTROL_D)) != 0;
     if (network_state.role == MultiplayerRole::joiner) {
         if (!network_state.have_state) return;
-        if (current_state != PLAYING) {
+        if (!round_active(current_state)) {
             if (ready_press && !network_state.ready[1]) queue_control(1, true);
         } else if (pause_press) {
             queue_control(2, !network_state.paused);
-        } else if (!network_state.paused && flap_press && network_state.flap_count < 4 &&
+        } else if (current_state == PLAYING && !network_state.paused && flap_press && network_state.flap_count < 4 &&
                    multiplayer_now_us() - network_state.state_time <= 100000) {
             uint16_t id = uint16_t(network_state.next_flap + 1);
             network_state.next_flap = id;
@@ -553,19 +586,18 @@ void flappy_multiplayer_update(const InputState& input) {
     const bool was_paused = network_state.paused;
     if (network_state.control_pending) {
         if (network_state.control_allowed && network_state.control_phase == current_state) {
-            if (network_state.control_kind == 1 && current_state != PLAYING) network_state.ready[1] = true;
-            if (network_state.control_kind == 2 && current_state == PLAYING)
+            if (network_state.control_kind == 1 && !round_active(current_state)) network_state.ready[1] = true;
+            if (network_state.control_kind == 2 && round_active(current_state))
                 network_state.paused = network_state.control_value;
         }
         network_state.handled_control = network_state.control_id;
         network_state.control_pending = false;
     }
-    if (current_state != PLAYING) {
+    if (!round_active(current_state)) {
         discard_flaps();
         if (ready_press) network_state.ready[0] = true;
         if (network_state.ready[0] && network_state.ready[1]) {
-            reset_game();
-            current_state = PLAYING;
+            begin_countdown();
             network_state.ready[0] = network_state.ready[1] = false;
             network_state.paused = false;
             network_state.flap_floor = network_state.tick;
@@ -586,6 +618,18 @@ void flappy_multiplayer_update(const InputState& input) {
             publish_state();
             return;
         }
+    }
+
+    if (current_state == COUNTDOWN) {
+        discard_flaps();
+        advance_countdown();
+        if (current_state == PLAYING) {
+            network_state.flap_floor = network_state.tick;
+            network_state.flap_floor_active = true;
+            network_state.phase_age = 0;
+        }
+        publish_state();
+        return;
     }
 
     bool flap[2] = {flap_press && !pause_press && !was_paused, false};
@@ -614,7 +658,7 @@ void flappy_multiplayer_update(const InputState& input) {
 void draw_playfield() {
     clear_screen(0x5CBF); // Sky blue background
 
-    if (current_state == PLAYING || current_state == GAME_OVER) {
+    if (round_active(current_state) || current_state == GAME_OVER) {
         for (int i = 0; i < MAX_PIPES; i++) {
             int px = (int)pipes[i].x;
             int py = (int)pipes[i].gap_y;
@@ -723,7 +767,8 @@ void flappy_draw(const char*) {
         draw_score(buffer);
         if (network_game_active()) {
             draw_text(4, 16, network_state.role == MultiplayerRole::host ? "YOU: P1" : "YOU: P2", 0xFFFF);
-            draw_centered_text(198, network_state.paused ? "D: BACK" : "A/B/C/D: FLAP  E: PAUSE", 0xFFFF);
+            draw_centered_text(198, network_state.paused ? "D: BACK" :
+                               current_state == COUNTDOWN ? "E: PAUSE" : "A/B/C/D: FLAP  E: PAUSE", 0xFFFF);
             if (network_state.paused) {
                 draw_filled_rect(90, 80, 140, 48, 0xFFFF);
                 draw_rect(90, 80, 140, 48, 0x0000);
@@ -733,6 +778,12 @@ void flappy_draw(const char*) {
         } else if (racing) {
             draw_text(4, 16, "P1: SPACE", 0xFFFF);
             draw_text(242, 16, "P2: V", 0xFFFF);
+        }
+        if (current_state == COUNTDOWN && !network_state.paused) {
+            draw_filled_rect(100, 80, 120, 40, 0xFFFF);
+            draw_rect(100, 80, 120, 40, 0x0000);
+            snprintf(buffer, sizeof(buffer), "START IN %d", (countdown_ticks + GAME_FPS - 1) / GAME_FPS);
+            draw_centered_text(96, buffer, 0x0000);
         }
     }
 }

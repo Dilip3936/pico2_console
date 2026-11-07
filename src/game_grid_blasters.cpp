@@ -2,10 +2,12 @@
 #include "graphics.h"
 #include "console.h"
 #include "multiplayer.h"
+#include "grid_blasters_assets.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <random>
 
 namespace {
 // Speeds are pixels/second; timings are 30 Hz simulation ticks.
@@ -34,7 +36,24 @@ static_assert(DASH_DURATION_TICKS > 0 && DASH_COOLDOWN_TICKS >= DASH_DURATION_TI
 
 struct Vec { float x = 0, y = 0; };
 struct Wall { int x, y, w, h; };
-constexpr Wall WALLS[] = {{150, 92, 20, 68}, {74, 58, 40, 12}, {206, 182, 40, 12}};
+struct ArenaMap { const char* name; int wall_count; Wall walls[6]; };
+// Each layout leaves both spawns clear; new cover is mirrored around the arena centre.
+constexpr ArenaMap MAPS[] = {
+    {"Original", 3, {{150, 92, 20, 68}, {74, 58, 40, 12}, {206, 182, 40, 12}}},
+    {"Pillars", 4, {{94, 66, 20, 32}, {206, 66, 20, 32},
+                     {94, 154, 20, 32}, {206, 154, 20, 32}}},
+    {"Crossroads", 4, {{152, 52, 16, 46}, {152, 154, 16, 46},
+                        {86, 118, 44, 16}, {190, 118, 44, 16}}},
+    {"Staggered Cover", 4, {{88, 56, 16, 68}, {216, 128, 16, 68},
+                             {140, 56, 16, 40}, {164, 156, 16, 40}}},
+    {"Courtyard", 6, {{112, 76, 96, 12}, {112, 164, 96, 12},
+                       {100, 88, 12, 20}, {100, 144, 12, 20},
+                       {208, 88, 12, 20}, {208, 144, 12, 20}}}
+};
+constexpr int MAP_COUNT = sizeof(MAPS) / sizeof(MAPS[0]);
+static_assert(MAP_COUNT == 5, "Grid Blasters map IDs must stay in range 0–4");
+int current_map = 0;
+std::minstd_rand map_random;
 struct Player {
     Vec position, aim, dash_direction;
     int health = STARTING_HEALTH;
@@ -123,7 +142,9 @@ bool overlaps(Vec position, float half, const Wall& wall) {
 bool blocked(Vec position, float half) {
     if (position.x - half < ARENA_LEFT || position.x + half > ARENA_RIGHT ||
         position.y - half < ARENA_TOP || position.y + half > ARENA_BOTTOM) return true;
-    for (const Wall& wall : WALLS) if (overlaps(position, half, wall)) return true;
+    const ArenaMap& map = MAPS[current_map];
+    for (int i = 0; i < map.wall_count; ++i)
+        if (overlaps(position, half, map.walls[i])) return true;
     return false;
 }
 
@@ -138,7 +159,9 @@ void centered_text(int y, const char* text, uint16_t color) {
     draw_text((DISPLAY_WIDTH - int(std::strlen(text)) * 6) / 2, y, text, color);
 }
 
-void reset_match() {
+void reset_match(bool randomize_map = false) {
+    speaker_stop();
+    if (randomize_map) current_map = int(map_random() % MAP_COUNT);
     players[0] = {};
     players[1] = {};
     players[0].position = {40, 126};
@@ -149,6 +172,9 @@ void reset_match() {
 }
 
 void init() {
+    current_map = 0;
+    // Keep map randomness independent of the other games' random sequences.
+    map_random.seed(uint32_t(multiplayer_now_us()));
     reset_match();
     phase = Phase::title;
     network = {};
@@ -171,6 +197,7 @@ void fire(int player) {
         bullet.life_ticks = BULLET_LIFETIME_TICKS;
         if (wireless()) bullet.id = ++network.bullet_sequence;
         enqueue_event(bullet, false);
+        speaker_play(grid_blasters_sounds::shot);
         return;
     }
 }
@@ -187,6 +214,7 @@ Vec prepare_player(int player, const ControlsState& controls, const Vec* request
         ship.dash_direction = unit(dash);
         ship.dash_ticks = DASH_DURATION_TICKS;
         ship.cooldown_ticks = DASH_COOLDOWN_TICKS;
+        speaker_play(grid_blasters_sounds::dash);
     }
     const Vec aim = {float(bool(controls.held & CONTROL_B)) - float(bool(controls.held & CONTROL_D)),
                      float(bool(controls.held & CONTROL_C)) - float(bool(controls.held & CONTROL_A))};
@@ -225,6 +253,7 @@ void move_bullet(Bullet& bullet, float dt) {
         std::fabs(bullet.position.y - target.position.y) < contact) {
         target.health = std::max(0, target.health - 1);
         target.flash_ticks = HIT_FLASH_TICKS;
+        speaker_play(grid_blasters_sounds::hit);
         retire(bullet);
     }
 }
@@ -246,7 +275,10 @@ void advance_playing(const InputState& input, const Vec* remote_dash = nullptr) 
         else --bullet.life_ticks;
     }
     // Both players' shots finish the tick; simultaneous knockouts are a draw.
-    if (!players[0].health || !players[1].health) phase = Phase::result;
+    if (!players[0].health || !players[1].health) {
+        phase = Phase::result;
+        speaker_play(grid_blasters_sounds::result);
+    }
 }
 
 void update(const InputState& input) {
@@ -256,11 +288,13 @@ void update(const InputState& input) {
 #endif
     if (phase == Phase::title || phase == Phase::result) {
         if (input.menu.back) {
+            speaker_stop();
             if (phase == Phase::title) console_return_to_selection();
             else phase = Phase::title;
         } else if (input.menu.select) {
-            reset_match();
+            reset_match(true);
             phase = Phase::playing;
+            speaker_play(grid_blasters_sounds::start);
         }
         return;
     }
@@ -270,7 +304,7 @@ void update(const InputState& input) {
 // STATE24: two LE32 players (x9,y8,aim3,hp2,cooldown6,dash3,flash1).
 // Byte 8: phase2,ready2,user-pause,flow-pause,event,zero; 9 round,
 // 10 command ACK, 11 countdown. Tail: seq16,id16,dir3/owner1,life8,
-// x16/y16 in 1/16 pixels,zero16. Without an event only seq baseline remains.
+// x16/y16 in 1/16 pixels,map8,zero8. Without an event only seq baseline and map remain.
 // INPUT24: signed axes8x2,fire4,eventACK16,commandID8,kind8,desired8,
 // captured dash axes8x2,origin tick16,round8,phase8,ten zero bytes.
 // Event and bullet IDs wrap independently. Only an accepted newer INPUT ACK
@@ -349,6 +383,7 @@ void publish_state() {
         }
         network.head_published = true;
     }
+    body[22] = uint8_t(current_map);
     multiplayer_publish(MultiplayerPacketType::state, network.tick, body);
 }
 void publish_input() {
@@ -408,7 +443,8 @@ bool receive_state(uint16_t tick, const uint8_t* body, Network next) {
     const int ready = (body[8] >> 2) & 3, countdown = body[11];
     const bool paused = body[8] & 16, flow = body[8] & 32, present = body[8] & 64;
     const bool reset = !next.have_state || body[9] != next.round;
-    if ((body[8] & 128) || !zeros(body + 22, 2) || countdown > COUNTDOWN_TICKS ||
+    if ((body[8] & 128) || body[22] >= MAP_COUNT || body[23] ||
+        (!reset && body[22] != current_map) || countdown > COUNTDOWN_TICKS ||
         incoming == Phase::title || ((paused || flow) && incoming != Phase::playing) ||
         (countdown && (incoming != Phase::ready || ready != 3)) ||
         (!countdown && incoming == Phase::ready && ready == 3) ||
@@ -436,7 +472,7 @@ bool receive_state(uint16_t tick, const uint8_t* body, Network next) {
     else if (ack != next.command_ack) return false;
     const uint16_t sequence = read16(body + 12), id = read16(body + 14);
     const int life = body[17];
-    if ((!present && !zeros(body + 14, 10)) ||
+    if ((!present && !zeros(body + 14, 8)) ||
         (present && (body[16] > 15 || life > BULLET_LIFETIME_TICKS ||
             (!life && (!zeros(body + 16, 1) || !zeros(body + 18, 4))) ||
             (life && (read16(body + 18) < ARENA_LEFT * 16 || read16(body + 18) > ARENA_RIGHT * 16 ||
@@ -455,6 +491,17 @@ bool receive_state(uint16_t tick, const uint8_t* body, Network next) {
             if (reset || !bullets[i].life_ticks) { slot = i; break; }
         if (slot < 0) return false;
     }
+    // Compare only fully validated snapshots; repeated bullet events must stay silent.
+    const bool baseline = !next.have_state || network.session != next.session;
+    bool hit = false, dashed = false;
+    for (int i = 0; i < 2; ++i) {
+        hit |= received[i].health < players[i].health;
+        dashed |= received[i].dash_ticks > players[i].dash_ticks;
+    }
+    const Phase previous_phase = phase;
+    const int previous_countdown = network.countdown;
+    const bool shot = present && life && sequence != next.event_ack;
+    current_map = body[22];
     if (reset) for (Bullet& bullet : bullets) bullet = {};
     if (present) {
         if (life) {
@@ -476,6 +523,20 @@ bool receive_state(uint16_t tick, const uint8_t* body, Network next) {
     // The response slot must be ready before the transport's 5 ms deadline.
     // Do not replace the freshest sampled held axes/fire with command capture.
     publish_input();
+    if (reset) speaker_stop();
+    if (baseline || paused || flow) speaker_stop();
+    else if (incoming == Phase::result && previous_phase != Phase::result)
+        speaker_play(grid_blasters_sounds::result);
+    else if (incoming == Phase::playing && previous_phase != Phase::playing)
+        speaker_play(grid_blasters_sounds::start);
+    else if (incoming == Phase::ready && countdown &&
+             (countdown + GAME_FPS - 1) / GAME_FPS != (previous_countdown + GAME_FPS - 1) / GAME_FPS)
+        speaker_play(grid_blasters_sounds::countdown);
+    else if (incoming == Phase::playing) {
+        if (hit) speaker_play(grid_blasters_sounds::hit);
+        else if (dashed) speaker_play(grid_blasters_sounds::dash);
+        else if (shot) speaker_play(grid_blasters_sounds::shot);
+    }
     return true;
 }
 bool receive_packet(MultiplayerPacketType type, uint16_t tick, const uint8_t* body, uint64_t now) {
@@ -566,12 +627,16 @@ void multiplayer_tick(const InputState& input) {
             if (--network.countdown == 0) {
                 phase = Phase::playing; network.ready = 0; network.phase_age = 0;
                 network.remote_x = network.remote_y = 0; network.remote_fire = 0;
+                speaker_play(grid_blasters_sounds::start);
+            } else if (network.countdown % GAME_FPS == 0) {
+                speaker_play(grid_blasters_sounds::countdown);
             }
         } else {
             if (select) network.ready |= 1;
             if (network.ready == 3) {
-                reset_match(); ++network.round; phase = Phase::ready;
+                reset_match(true); ++network.round; phase = Phase::ready;
                 network.countdown = COUNTDOWN_TICKS; network.phase_age = 0;
+                speaker_play(grid_blasters_sounds::countdown);
                 // Only a new round discards old events. The monotonic baseline survives.
                 network.head = network.count = 0; network.head_published = false;
                 network.event_ack = network.event_sequence;
@@ -588,6 +653,7 @@ void multiplayer_tick(const InputState& input) {
         if (network.flow_paused && !network.count) network.flow_paused = false;
         if (!network.flow_paused && EVENT_CAPACITY - network.count < MAX_BULLETS + 2)
             network.flow_paused = true;
+        if (network.paused || network.flow_paused) speaker_stop();
         if (!was_paused && !network.paused && !network.flow_paused) {
             const uint64_t now = multiplayer_now_us();
             const bool fresh = network.have_input && now >= network.input_time && now - network.input_time < INPUT_TIMEOUT_US;
@@ -645,7 +711,9 @@ void draw(const char*) {
         draw_filled_rect(ARENA_LEFT, y, ARENA_RIGHT - ARENA_LEFT, 1, GRID);
     draw_rect(ARENA_LEFT - 1, ARENA_TOP - 1, ARENA_RIGHT - ARENA_LEFT + 2,
               ARENA_BOTTOM - ARENA_TOP + 2, MUTED);
-    for (const Wall& wall : WALLS) {
+    const ArenaMap& map = MAPS[current_map];
+    for (int i = 0; i < map.wall_count; ++i) {
+        const Wall& wall = map.walls[i];
         draw_filled_rect(wall.x, wall.y, wall.w, wall.h, 0x3186);
         draw_rect(wall.x, wall.y, wall.w, wall.h, MUTED);
     }
