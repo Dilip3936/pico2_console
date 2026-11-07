@@ -16,7 +16,7 @@ int main() {
     printf("Starting Pico Console...\n");
 
     display_init();
-    display_set_madctl(0x60); // MX + MV: landscape, keeping RGB order.
+    display_set_madctl(0xA0); // MY + MV: opposite landscape orientation, keeping RGB order.
     display_fill(COLOR_BLACK);
 
     console_init("B/K: SELECT  A/C: MOVE");

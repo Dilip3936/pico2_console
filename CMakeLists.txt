@@ -58,6 +58,13 @@ endif()
 # CONFIGURE_DEPENDS picks up added or removed games on the next build.
 file(GLOB GAME_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/game_*.cpp")
 list(SORT GAME_SOURCES)
+# The optional local game goes last; its absence must not affect normal builds.
+set(LOCAL_LAST_GAME "${CMAKE_CURRENT_SOURCE_DIR}/src/game_flappy_boss.cpp")
+list(FIND GAME_SOURCES "${LOCAL_LAST_GAME}" LOCAL_LAST_GAME_INDEX)
+if(NOT LOCAL_LAST_GAME_INDEX EQUAL -1)
+    list(REMOVE_ITEM GAME_SOURCES "${LOCAL_LAST_GAME}")
+    list(APPEND GAME_SOURCES "${LOCAL_LAST_GAME}")
+endif()
 set(GAME_DECLARATIONS "")
 set(GAME_ENTRIES "")
 foreach(source IN LISTS GAME_SOURCES)

@@ -64,9 +64,11 @@ void draw_menu() {
     }
 
     if (registered_game_count == 0) centered_text(90, "NO GAMES INSTALLED", 0xFFFF);
-    centered_text(194, "A/C OR STICK/ARROWS: CHOOSE", 0xFFFF);
-    centered_text(210, "B/K OR X/ENTER: SELECT", 0xFFFF);
-    centered_text(226, "E/P: PAUSE   F/ESC: MENU", 0xFFFF);
+#ifdef PICO_BUILD
+    centered_text(216, "A/C/STICK: MOVE  B/K: SELECT", 0xFFFF);
+#else
+    centered_text(216, "ARROWS: MOVE  X/ENTER: SELECT", 0xFFFF);
+#endif
 }
 }
 

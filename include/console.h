@@ -2,7 +2,7 @@
 #include <stddef.h>
 #include "game.h"
 
-// CMake generates the menu's game list from src/game_*.cpp, sorted by filename.
+// CMake generates the menu's game list from src/game_*.cpp in menu order.
 extern const Game* const registered_games[];
 extern const size_t registered_game_count;
 
