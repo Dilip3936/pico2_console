@@ -27,7 +27,17 @@ struct Packet {
 bool transport = false, tx_pending = false, response_pending = false;
 bool response_game = false, outgoing_pending = false, incoming_seen = false;
 uint16_t incoming_tick = 0;
-uint8_t outgoing[RADIO_PAYLOAD_SIZE] = {};
+// One replaceable queued snapshot and one frozen pair bound memory and prevent
+// a publish during TX from changing the second half of the active snapshot.
+uint8_t outgoing[2][RADIO_PAYLOAD_SIZE] = {};
+bool outgoing_pair = false, pair_active = false;
+uint8_t active_pair[2][RADIO_PAYLOAD_SIZE] = {};
+unsigned pair_next = 0;
+uint64_t pair_reply_until = 0;
+constexpr uint64_t PAIR_REPLY_WINDOW_US = RESPONSE_US * 2;
+bool pair_seen = false;
+uint16_t pair_tick = 0;
+uint8_t pair_mask = 0, pair_body[MULTIPLAYER_PAIR_BODY_SIZE] = {};
 uint64_t host_token = 0, join_token = 0, token_counter = 0;
 uint64_t last_peer = 0, next_host = 0, response_at = 0;
 uint32_t sequence = 0;
@@ -88,17 +98,37 @@ bool newer(uint32_t incoming, uint32_t previous) {
 void receive_game_packet(const uint8_t* bytes, uint64_t now) {
     const uint32_t session = multiplayer_session_id();
     if (bytes[0] != 0xd7 || !session || get_integer(bytes + 2, 4) != session) return;
+    const bool is_pair = role == MultiplayerRole::joiner &&
+        (bytes[1] == 0x13 || bytes[1] == 0x14);
     const MultiplayerPacketType type = role == MultiplayerRole::host ?
-        MultiplayerPacketType::input : MultiplayerPacketType::state;
-    if (bytes[1] != (0x10 | (uint8_t)type)) return;
+        MultiplayerPacketType::input : is_pair ? MultiplayerPacketType::state_pair :
+        MultiplayerPacketType::state;
+    if (!is_pair && bytes[1] != (0x10 | (uint8_t)type)) return;
     if (state != MultiplayerState::connected &&
         !(role == MultiplayerRole::joiner && state == MultiplayerState::searching)) return;
     const uint16_t tick = (uint16_t)get_integer(bytes + 6, 2);
     const uint16_t difference = (uint16_t)(tick - incoming_tick);
     if (incoming_seen && (!difference || difference >= 0x8000)) return;
-    // Validate before connecting: the first STATE proves receipt of CONFIRM,
-    // even if the host starts gameplay before its first pairing PING.
-    if (!receiver || !receiver(type, tick, bytes + 8, now)) return;
+    const uint8_t* body = bytes + 8;
+    if (is_pair) {
+        const uint16_t delta = (uint16_t)(tick - pair_tick);
+        if (pair_seen && delta && delta >= 0x8000) return;
+        if (!pair_seen || delta) {
+            pair_seen = true;
+            pair_tick = tick;
+            pair_mask = 0;
+        }
+        const unsigned part = bytes[1] == 0x13 ? 0 : 1;
+        const uint8_t bit = (uint8_t)(1u << part);
+        if (pair_mask & bit) return;
+        memcpy(pair_body + part * MULTIPLAYER_BODY_SIZE, body, MULTIPLAYER_BODY_SIZE);
+        pair_mask |= bit;
+        if (pair_mask != 3) return;
+        body = pair_body;
+    }
+    // Validate before connecting: only a complete accepted snapshot proves receipt
+    // of CONFIRM. Partial, duplicate and rejected pairs never schedule a reply.
+    if (!receiver || !receiver(type, tick, body, now)) return;
     incoming_tick = tick;
     incoming_seen = true;
     last_peer = now;
@@ -165,6 +195,13 @@ void stop_transport() {
     if (transport) radio_shutdown();
     transport = tx_pending = response_pending = false;
     outgoing_pending = response_game = false;
+    outgoing_pair = pair_active = pair_seen = false;
+    pair_next = pair_mask = 0;
+    pair_tick = 0;
+    pair_reply_until = 0;
+    memset(outgoing, 0, sizeof(outgoing));
+    memset(active_pair, 0, sizeof(active_pair));
+    memset(pair_body, 0, sizeof(pair_body));
 #endif
 }
 
@@ -264,16 +301,37 @@ void multiplayer_publish(MultiplayerPacketType type, uint16_t tick, const uint8_
          (type != MultiplayerPacketType::input ||
           (state != MultiplayerState::searching && state != MultiplayerState::connected))) ||
         role == MultiplayerRole::none) return;
-    outgoing[0] = 0xd7;
-    outgoing[1] = 0x10 | (uint8_t)type;
-    put_integer(outgoing + 2, session, 4);
-    put_integer(outgoing + 6, tick, 2);
-    memcpy(outgoing + 8, body, MULTIPLAYER_BODY_SIZE);
+    outgoing[0][0] = 0xd7;
+    outgoing[0][1] = 0x10 | (uint8_t)type;
+    put_integer(outgoing[0] + 2, session, 4);
+    put_integer(outgoing[0] + 6, tick, 2);
+    memcpy(outgoing[0] + 8, body, MULTIPLAYER_BODY_SIZE);
+    outgoing_pair = false;
     outgoing_pending = true;
 #else
     (void)type;
     (void)tick;
     (void)body;
+#endif
+}
+
+void multiplayer_publish_pair(uint16_t tick, const uint8_t* bodies) {
+#ifdef PICO_BUILD
+    const uint32_t session = multiplayer_session_id();
+    if (!transport || !session || !bodies || role != MultiplayerRole::host ||
+        state != MultiplayerState::connected) return;
+    for (unsigned part = 0; part < 2; ++part) {
+        uint8_t* bytes = outgoing[part];
+        bytes[0] = 0xd7;
+        bytes[1] = (uint8_t)(0x13 + part);
+        put_integer(bytes + 2, session, 4);
+        put_integer(bytes + 6, tick, 2);
+        memcpy(bytes + 8, bodies + part * MULTIPLAYER_BODY_SIZE, MULTIPLAYER_BODY_SIZE);
+    }
+    outgoing_pair = outgoing_pending = true;
+#else
+    (void)tick;
+    (void)bodies;
 #endif
 }
 
@@ -306,6 +364,13 @@ void multiplayer_service(uint64_t now_us) {
     if (tx_pending) {
         RadioTxResult result = radio_poll_tx();
         tx_pending = result.status == RadioTxStatus::pending;
+        if (!tx_pending && pair_active && pair_next == 2) {
+            pair_active = false;
+            // Start from observed TX completion, not publish/send time. Keep RX
+            // through the peer's 5 ms delay and a bounded transmission/retry window,
+            // even when either fragment was lost. No application retry is added.
+            pair_reply_until = now_us + PAIR_REPLY_WINDOW_US;
+        }
     }
     if (state == MultiplayerState::connected && now_us - last_peer >= TIMEOUT_US) {
         stop_transport();
@@ -323,8 +388,18 @@ void multiplayer_service(uint64_t now_us) {
         }
     }
     if (role == MultiplayerRole::host && game_active && state == MultiplayerState::connected) {
-        if (outgoing_pending) {
-            tx_pending = radio_send(outgoing);
+        if (now_us < pair_reply_until) return;
+        if (!pair_active && outgoing_pending && outgoing_pair) {
+            memcpy(active_pair, outgoing, sizeof(active_pair));
+            pair_active = true;
+            pair_next = 0;
+            outgoing_pending = false;
+        }
+        if (pair_active) {
+            tx_pending = radio_send(active_pair[pair_next]);
+            if (tx_pending) ++pair_next;
+        } else if (outgoing_pending) {
+            tx_pending = radio_send(outgoing[0]);
             if (tx_pending) outgoing_pending = false;
         }
     } else if (role == MultiplayerRole::host && now_us >= next_host) {
@@ -336,7 +411,7 @@ void multiplayer_service(uint64_t now_us) {
     } else if (role == MultiplayerRole::joiner && response_pending && now_us >= response_at) {
         if (response_game) {
             if (outgoing_pending) {
-                tx_pending = radio_send(outgoing);
+                tx_pending = radio_send(outgoing[0]);
                 if (tx_pending) outgoing_pending = response_pending = false;
             }
         } else if (send_packet(response)) {

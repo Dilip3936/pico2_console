@@ -8,19 +8,30 @@ enum class MultiplayerState {
 };
 enum class MultiplayerRole { none, host, joiner };
 
-enum class MultiplayerPacketType : uint8_t { state = 1, input = 2 };
+enum class MultiplayerPacketType : uint8_t { state = 1, input = 2, state_pair = 3 };
 constexpr size_t MULTIPLAYER_BODY_SIZE = 24;
-// The body is temporary callback storage; do not retain its pointer. Return true
-// only for valid game data; rejected packets do not refresh the peer timeout.
+constexpr size_t MULTIPLAYER_PAIR_BODY_SIZE = 48;
+// The body is 48 bytes ONLY for state_pair; state/input remain 24 bytes. Wire
+// fragments never reach the callback. Storage is temporary; do not retain it.
+// Return true only for valid game data; rejection does not refresh peer timeout.
 using MultiplayerReceiver = bool (*)(MultiplayerPacketType, uint16_t, const uint8_t*, uint64_t);
 
 // Open/close clear the receiver; choosing or starting a role preserves it.
 void multiplayer_set_receiver(MultiplayerReceiver receiver);
 // FNV-1a freshness ID, not authentication; zero until both pairing tokens exist.
 uint32_t multiplayer_session_id();
-// Copies all 24 body bytes into the latest outgoing slot (host STATE/joiner INPUT).
-// INPUT is sent only in response to a valid STATE, after the existing 5 ms delay.
+// Accepts only state/input and copies 24 bytes (host STATE/joiner INPUT).
+// INPUT is sent only after valid STATE or complete state_pair, delayed by 5 ms.
 void multiplayer_publish(MultiplayerPacketType type, uint16_t tick, const uint8_t* body);
+// Host only: copies contiguous 48 bytes. Both 32-byte packets use the existing
+// D7/version-1/session/LE-tick header; low-nibble types 3/4 carry bytes 0–23/24–47.
+// Parts may arrive in either order. Unsigned 16-bit half-range freshness rejects
+// stale/duplicate parts; a newer pair discards an incomplete one. Even a rejected
+// complete callback consumes that pair tick, without connecting or refreshing life.
+// Only the queued snapshot is replaceable; an active pair stays intact. After
+// part two completes, host reserves 10 ms RX (5 ms reply delay + 5 ms TX/retries).
+// This guard applies only to pairs; normal state/input wire layout/timing is unchanged.
+void multiplayer_publish_pair(uint16_t tick, const uint8_t* bodies);
 // Only a connected session can enter gameplay and hide the connection screen.
 void multiplayer_enter_game();
 // Remains true on timeout so the console can notify the game before returning.

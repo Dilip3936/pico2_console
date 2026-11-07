@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 extern const Game game_grid_blasters;
+extern const Game game_race_duel;
 
 
 namespace {
@@ -84,8 +85,37 @@ uint8_t button_for_key(SDL_Keycode key) {
     }
 }
 
+void handle_racing_key(InputState& input, const SDL_KeyboardEvent& key) {
+    const SDL_Keycode code = key.keysym.sym;
+    const bool second = code == SDLK_w || code == SDLK_a || code == SDLK_s ||
+                        code == SDLK_d || code == SDLK_v;
+    uint8_t button = 0;
+    switch (code) {
+        case SDLK_UP: case SDLK_w: button = CONTROL_A; break;
+        case SDLK_RIGHT: case SDLK_d: button = CONTROL_B; break;
+        case SDLK_DOWN: case SDLK_s: button = CONTROL_C; break;
+        case SDLK_LEFT: case SDLK_a: button = CONTROL_D; break;
+        case SDLK_RETURN: case SDLK_v: button = CONTROL_K; break;
+        default: return;
+    }
+    ControlsState& controls = second ? input.second_player_controls : input.controls;
+    // Direction keys steer without becoming menu select/back events. Ready has
+    // its own key for each player, so moving right cannot start a round.
+    if (key.type == SDL_KEYDOWN) {
+        controls.pressed |= button & CONTROL_K & ~controls.held;
+        controls.held |= button;
+    } else {
+        controls.released |= button & CONTROL_K & controls.held;
+        controls.held &= ~button;
+    }
+}
+
 void handle_key(InputState& input, const SDL_KeyboardEvent& key) {
     if (key.repeat) return;
+    if (console_active_game() == &game_race_duel && key.keysym.sym != SDLK_p && key.keysym.sym != SDLK_ESCAPE) {
+        handle_racing_key(input, key);
+        return;
+    }
     if (uses_twin_stick_controls() && key.keysym.sym != SDLK_p && key.keysym.sym != SDLK_ESCAPE) {
         handle_twin_stick_key(input, key);
         return;
@@ -133,7 +163,7 @@ int main() {
     InputState input = {};
     input.controls.x = input.controls.y = 2048; // We leave the virtual joystick centered.
     input.second_player_controls.x = input.second_player_controls.y = 2048;
-    bool twin_stick_input = false;
+    const Game* input_layout = nullptr;
     bool running = true;
     int exit_code = 0;
     SDL_Event event;
@@ -162,11 +192,12 @@ int main() {
 
         while (frame_start - last_logic_time >= frame_delay) {
             console_update(input);
-            const bool next_layout = uses_twin_stick_controls();
-            if (next_layout != twin_stick_input) {
+            const Game* next_layout = uses_twin_stick_controls() || console_active_game() == &game_race_duel
+                ? console_active_game() : nullptr;
+            if (next_layout != input_layout) {
                 // Held keys from a different layout must not become movement/fire.
                 reset_input(input);
-                twin_stick_input = next_layout;
+                input_layout = next_layout;
             }
             input.controls.pressed = 0;
             input.controls.released = 0;
