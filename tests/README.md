@@ -86,11 +86,16 @@ Building does not flash either board. Use a Release configuration for comparison
 
 Flash the profiler manually to the desired console(s), open USB serial and use
 normal controls to exercise menus, games, pause or wireless multiplayer. It emits
-`[PROFILE]`, eight `[PROFILE_TASK]` lines and `[PROFILE_END]` roughly once per
+`[PROFILE]`, nine `[PROFILE_TASK]` lines, `[PROFILE_DISPLAY]` and `[PROFILE_END]` roughly once per
 second. Task lines show total microseconds, elapsed-time percentage, call count,
 integer mean and maximum. Divide header polls/updates/frames by
 `elapsed_us / 1000000` for rates. `accounted_us` should equal `elapsed_us` exactly;
 percentage rounding can prevent displayed percentages summing to 100.
+`audio_service` measures the main loop's speaker maintenance call. Sound triggering
+inside games remains in `game_update`. `[PROFILE_DISPLAY]` reports completed DMA
+transfers' observed total/maximum duration, submitted row range and active game.
+These durations overlap CPU tasks and are not added to the accounting totals.
+`[PROFILE_INFO]` reports system/peripheral clocks and SDK-selected SPI0 baud rate.
 
 These are core-0 **elapsed wall times, not active CPU cycles/utilization**.
 Blocking waits and interrupts stay in their enclosing task. `sleep` is not CPU

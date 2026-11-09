@@ -4,16 +4,18 @@
 #include <stdarg.h>
 #include <pico/stdlib.h>
 #include <hardware/clocks.h>
+#include <hardware/spi.h>
 #include "console.h"
 #include "graphics.h"
 #include "display.h"
 #include "multiplayer.h"
+#include "speaker.h"
 
 namespace {
 
-enum Region { CONTROLS, RADIO, LOGIC, DRAW, DISPLAY, LOGGING, SLEEP, OTHER, REGION_COUNT };
+enum Region { CONTROLS, RADIO, AUDIO, LOGIC, DRAW, DISPLAY, LOGGING, SLEEP, OTHER, REGION_COUNT };
 static const char* const region_names[] = {
-    "controls", "radio_service", "game_update", "draw", "display",
+    "controls", "radio_service", "audio_service", "game_update", "draw", "display",
     "logging", "sleep", "other"
 };
 
@@ -30,6 +32,9 @@ struct Profile {
     uint32_t draws = 0;
     uint32_t frames = 0;
     uint64_t poll_gap_max_us = 0;
+    Bucket transfers;
+    uint32_t rows_min = DISPLAY_HEIGHT;
+    uint32_t rows_max = 0;
 };
 
 static Profile profile;
@@ -38,6 +43,7 @@ static bool frame_in_flight = false;
 static uint64_t window_start_us = 0;
 static uint64_t cursor_us = 0;
 static uint64_t last_poll_us = 0;
+static uint64_t frame_start_us = 0;
 
 static void add_time(Region region, uint64_t elapsed_us) {
     Bucket& bucket = profile.buckets[region];
@@ -105,14 +111,25 @@ static void report_if_due() {
                (unsigned)bucket.calls, (unsigned long long)mean_us,
                (unsigned long long)bucket.max_us);
     }
+    // DMA duration overlaps loop work; report it separately, never as CPU time.
+    printf("[PROFILE_DISPLAY] completed=%u total_us=%llu max_us=%llu"
+           " rows_min=%u rows_max=%u game=\"%s\"\n",
+           (unsigned)saved.transfers.calls,
+           (unsigned long long)saved.transfers.total_us,
+           (unsigned long long)saved.transfers.max_us,
+           (unsigned)saved.rows_min, (unsigned)saved.rows_max,
+           console_active_game() ? console_active_game()->name : "MENU");
     printf("[PROFILE_END]\n");
 }
 
 static ControlsState profile_controls_poll() {
     if (!active) {
         printf("[PROFILE_INFO] core0 elapsed wall time, NOT active CPU cycles;"
-               " clock_hz=%lu game_target_hz=%u profiler_bytes=%u\n",
-               (unsigned long)clock_get_hz(clk_sys), (unsigned)GAME_FPS,
+               " clock_hz=%lu peri_hz=%lu display_spi_hz=%lu"
+               " game_target_hz=%u profiler_bytes=%u\n",
+               (unsigned long)clock_get_hz(clk_sys),
+               (unsigned long)clock_get_hz(clk_peri),
+               (unsigned long)spi_get_baudrate(spi0), (unsigned)GAME_FPS,
                (unsigned)sizeof(profile));
         window_start_us = cursor_us = time_us_64();
         active = true;
@@ -130,6 +147,11 @@ static ControlsState profile_controls_poll() {
 static void profile_multiplayer_service(uint64_t now_us) {
     Scope scope(RADIO);
     multiplayer_service(now_us);
+}
+
+static void profile_speaker_service() {
+    Scope scope(AUDIO);
+    speaker_service();
 }
 
 static void profile_console_update(const InputState& input) {
@@ -151,6 +173,10 @@ static bool profile_display_busy() {
     if (active && frame_in_flight && !busy) {
         frame_in_flight = false;
         ++profile.frames;
+        const uint64_t elapsed_us = time_us_64() - frame_start_us;
+        profile.transfers.total_us += elapsed_us;
+        if (elapsed_us > profile.transfers.max_us) profile.transfers.max_us = elapsed_us;
+        ++profile.transfers.calls;
     }
     return busy;
 }
@@ -158,8 +184,14 @@ static bool profile_display_busy() {
 static bool profile_display_blit_async(int x, int y, int w, int h,
                                        const uint16_t* pixels) {
     Scope scope(DISPLAY);
+    const uint64_t start_us = active ? time_us_64() : 0;
     const bool submitted = display_blit_async(x, y, w, h, pixels);
-    if (active && submitted) frame_in_flight = true;
+    if (active && submitted) {
+        frame_in_flight = true;
+        frame_start_us = start_us;
+        if (unsigned(h) < profile.rows_min) profile.rows_min = unsigned(h);
+        if (unsigned(h) > profile.rows_max) profile.rows_max = unsigned(h);
+    }
     return submitted;
 }
 
@@ -193,6 +225,7 @@ static void profile_sleep_ms(uint32_t milliseconds) {
 // A renamed/new main-loop call must be reviewed here to keep attribution useful.
 #define controls_poll profile_controls_poll
 #define multiplayer_service profile_multiplayer_service
+#define speaker_service profile_speaker_service
 #define console_update profile_console_update
 #define console_draw profile_console_draw
 #define display_busy profile_display_busy
@@ -203,6 +236,7 @@ static void profile_sleep_ms(uint32_t milliseconds) {
 #include "../src/main_pico.cpp"
 #undef controls_poll
 #undef multiplayer_service
+#undef speaker_service
 #undef console_update
 #undef console_draw
 #undef display_busy
