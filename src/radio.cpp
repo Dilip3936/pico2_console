@@ -88,7 +88,7 @@ bool radio_init(const RadioConfig& config) {
     write_register(SETUP_AW, 0x03);
     write_register(SETUP_RETR, 0x10 | config.retries); // 500 us between retries.
     write_register(RF_CH, config.channel);
-    write_register(RF_SETUP, 0x00); // 1 Mbit/s, chip RF power -18 dBm; module PA gain is separate.
+    write_register(RF_SETUP, 0x06); // 1 Mbit/s, maximum chip RF power 0 dBm; module PA gain is separate.
     write_register(DYNPD, 0);
     write_register(FEATURE, 0);
     command(0x20 | RX_ADDR_P1, config.local_address, nullptr, 5);
@@ -105,7 +105,7 @@ bool radio_init(const RadioConfig& config) {
                  check_address(TX_ADDR, config.peer_address) &&
                  check_address(RX_ADDR_P0, config.peer_address) &&
                  check_register(SETUP_AW, 3) && check_register(RF_CH, config.channel) &&
-                 check_register(RF_SETUP, 0, 0x2e) &&
+                 check_register(RF_SETUP, 0x06, 0x2e) &&
                  check_register(SETUP_RETR, 0x10 | config.retries) &&
                  check_register(EN_AA, ack_pipes) && check_register(EN_RXADDR, 3) &&
                  check_register(RX_PW_P0, 32) && check_register(RX_PW_P1, 32) &&

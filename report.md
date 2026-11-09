@@ -57,6 +57,9 @@ The installed boards are **Pico 2, not Pico 2 W**. Pico 2 W has built-in Wi-Fi/B
 
 At 1 Mbit/s, a 32-byte payload occupies about **0.33 ms of RF airtime**, including our radio framing. Our firmware controls when the exchange starts. This suits frequent control and state messages.
 
+- Chip transmit power is software-selectable at **−18, −12, −6 or 0 dBm**. Current firmware uses **0 dBm (maximum)**; earlier radio measurements used −18 dBm. These are chip settings, not measured PA+LNA module output.
+- Higher power can improve link margin and usable range, but increases supply demand and potential interference. Range also depends on antennas, obstacles and interference.
+
 nRF is therefore a good fit for this specific workload. It is not inherently faster or more power-efficient than every Wi-Fi or BLE configuration. Both alternatives can work without internet access, and BLE needs no router.
 
 ## 4. Hardware and connections
@@ -66,6 +69,7 @@ The ST7789 display uses SPI0; the radio uses SPI1. Separate buses keep long disp
 ### PA+LNA and supply decoupling
 
 The PA increases transmit signal power; the LNA amplifies the received signal. They can improve signal margin and range, but add supply load. Payload size and packet speed remain unchanged.
+
 
 Transmit bursts create rapid load changes. Supply wires have resistance and inductance, so the module voltage can briefly dip. A local capacitor across VCC and GND supplies short current pulses.
 
@@ -316,5 +320,3 @@ Early replies can overlap ACK/retries. Waiting reduced missed replies, so we use
 The standalone delivery test used channel 76, 1 Mbit/s, 32-byte packets, 30 Hz and ACK + three retries, with no display or game running. Delivery was 998/1,000 packets A→B and 1,000/1,000 B→A.
 
 Calculated at 30 exchanges/s: one-packet games carry 1,920 payload bytes/s; Race Duel 2,880 bytes/s, excluding radio framing, ACKs and retries.
-
-
